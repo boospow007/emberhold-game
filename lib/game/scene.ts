@@ -1,5 +1,13 @@
 import * as T from 'three';
-import { World, MAPS, Obstacle, BuildKind, canBuild, terrain } from './engine';
+import {
+  World,
+  MAPS,
+  Obstacle,
+  BuildKind,
+  canBuild,
+  terrain,
+  dist,
+} from './engine';
 import {
   HALF,
   SIZE,
@@ -41,6 +49,35 @@ export class GameScene {
   lastKeepHp = Infinity;
   skyDay = new T.Color();
   skyNight = new T.Color();
+  windowMat = new T.MeshStandardMaterial({
+    color: 0x3b3a2c,
+    emissive: 0xffb454,
+    emissiveIntensity: 0,
+    roughness: 0.6,
+  });
+  glowMat = new T.MeshStandardMaterial({
+    color: 0xffc46a,
+    emissive: 0xff9a2a,
+    emissiveIntensity: 1.4,
+    roughness: 0.4,
+  });
+  eyeMat = new T.MeshStandardMaterial({
+    color: 0x2a0a10,
+    emissive: 0xff3d3d,
+    emissiveIntensity: 1.2,
+  });
+  smokes: { m: T.Mesh; born: number; life: number; vx: number; vz: number }[] =
+    [];
+  smokeGroup = new T.Group();
+  smokeGeo = new T.IcosahedronGeometry(0.22, 0);
+  smokeMat = new T.MeshStandardMaterial({
+    color: 0xd9dcd6,
+    transparent: true,
+    opacity: 0.5,
+    roughness: 1,
+  });
+  bursts: { g: T.Group; born: number }[] = [];
+  lastLevel = new Map<string, number>();
   sun: T.DirectionalLight;
   disposed = false;
   constructor(
@@ -86,7 +123,7 @@ export class GameScene {
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
     this.root = new T.Group();
-    this.scene.add(this.root, this.effects, this.gemGroup);
+    this.scene.add(this.root, this.effects, this.gemGroup, this.smokeGroup);
     this.buildGround(world);
     this.map = map;
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -192,6 +229,48 @@ export class GameScene {
     this.waterBase = new Float32Array(
       (water.geometry.attributes.position as T.BufferAttribute).array,
     );
+    // Grass tufts and pebbles on plains: one instanced mesh, deterministic per seed.
+    const tuft = new T.InstancedMesh(
+      new T.ConeGeometry(0.16, 0.5, 4),
+      new T.MeshStandardMaterial({
+        color:
+          world.map === 'snow'
+            ? 0xb9cdc9
+            : world.map === 'desert'
+              ? 0xb9a26a
+              : 0x6f9a62,
+        roughness: 1,
+        flatShading: true,
+      }),
+      900,
+    );
+    const m4 = new T.Matrix4(),
+      q = new T.Quaternion(),
+      sc = new T.Vector3(),
+      pv = new T.Vector3();
+    let placed = 0;
+    let seed = 0;
+    for (const ch of world.seed) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const rnd = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    for (let i = 0; i < 4000 && placed < 900; i++) {
+      const x = (rnd() - 0.5) * (SIZE - 6),
+        z = (rnd() - 0.5) * (SIZE - 6);
+      if (t.cell(x, z) !== 'plain' || Math.hypot(x, z) < 3) continue;
+      const h = 0.6 + rnd() * 0.8;
+      pv.set(x, t.y(x, z) + 0.2 * h, z);
+      q.setFromEuler(new T.Euler(0, rnd() * 6.28, (rnd() - 0.5) * 0.3));
+      sc.set(0.8 + rnd() * 0.6, h, 0.8 + rnd() * 0.6);
+      m4.compose(pv, q, sc);
+      tuft.setMatrixAt(placed++, m4);
+    }
+    tuft.count = placed;
+    tuft.instanceMatrix.needsUpdate = true;
+    tuft.castShadow = false;
+    tuft.receiveShadow = true;
+    this.root.add(tuft);
     const rim = this.box(SIZE + 6, 3, SIZE + 6, colors.dark);
     rim.position.y = -2.2;
     this.root.add(rim);
@@ -284,93 +363,187 @@ export class GameScene {
         this.dying.push({ g, at: now, kind: 'tree', base: g.scale.x });
       }
   }
+  window(w: number, h: number) {
+    const m = new T.Mesh(new T.BoxGeometry(w, h, 0.06), this.windowMat);
+    return m;
+  }
+  torch(x: number, y: number, z: number) {
+    const g = new T.Group();
+    const pole = this.box(0.08, 0.5, 0.08, 0x3f3226);
+    pole.position.y = -0.2;
+    g.add(pole);
+    const fire = new T.Mesh(new T.OctahedronGeometry(0.14), this.glowMat);
+    fire.name = 'torch';
+    g.add(fire);
+    g.position.set(x, y, z);
+    return g;
+  }
+  flag(x: number, y: number, z: number, color: number, tall = 1.6) {
+    const g = new T.Group();
+    const pole = this.box(0.07, tall, 0.07, 0x3f3226);
+    pole.position.y = tall / 2;
+    g.add(pole);
+    const cloth = this.box(0.55, 0.32, 0.03, color);
+    cloth.position.set(0.3, tall - 0.2, 0);
+    cloth.name = 'flag';
+    g.add(cloth);
+    g.position.set(x, y, z);
+    return g;
+  }
   building(kind: string, branch = '', level = 1) {
     const g = new T.Group();
     if (kind === 'keep') {
-      const base = this.box(3.2, 1, 3.2, 0xa9afa0);
+      const base = this.box(3.4, 1, 3.4, 0xa9afa0);
       base.position.y = 0.5;
       g.add(base);
-      const body = this.box(2.2, 2.2, 2.2, 0xd1c9ad);
-      body.position.y = 1.6;
+      const step = this.box(2.2, 0.3, 1.2, 0xb9bfae);
+      step.position.set(0, 1.05, 1.6);
+      g.add(step);
+      const body = this.box(2.3, 2.3, 2.3, 0xd1c9ad);
+      body.position.y = 1.65;
       g.add(body);
+      const door = this.box(0.7, 1.1, 0.08, 0x4a3524);
+      door.position.set(0, 1.05, 1.18);
+      g.add(door);
+      for (const x of [-0.7, 0.7]) {
+        const win = this.window(0.32, 0.42);
+        win.position.set(x, 2.1, 1.18);
+        g.add(win);
+      }
+      for (const z of [-1.18, 1.18]) {
+        const beam = this.box(2.5, 0.16, 0.1, 0x8a6a48);
+        beam.position.set(0, 2.85, z);
+        g.add(beam);
+      }
       const roof = new T.Mesh(
-        new T.ConeGeometry(2, 1.7, 4),
+        new T.ConeGeometry(2.05, 1.8, 4),
         this.mat(0x335b55),
       );
       roof.rotation.y = Math.PI / 4;
-      roof.position.y = 3.45;
+      roof.position.y = 3.6;
       g.add(roof);
-      for (const x of [-1.6, 1.6])
-        for (const z of [-1.6, 1.6]) {
-          const t = this.box(0.7, 2.4, 0.7, 0xb3b7a2);
-          t.position.set(x, 1.2, z);
+      for (const x of [-1.7, 1.7])
+        for (const z of [-1.7, 1.7]) {
+          const t = this.box(0.74, 2.6, 0.74, 0xb3b7a2);
+          t.position.set(x, 1.3, z);
           g.add(t);
+          const cap = new T.Mesh(
+            new T.ConeGeometry(0.55, 0.6, 4),
+            this.mat(0x2b4a45),
+          );
+          cap.rotation.y = Math.PI / 4;
+          cap.position.set(x, 2.9, z);
+          g.add(cap);
+          g.add(this.torch(x, 2.5, z + (z > 0 ? 0.45 : -0.45)));
         }
-      const flame = new T.Mesh(
-        new T.OctahedronGeometry(0.45),
-        new T.MeshBasicMaterial({ color: 0xffc46a }),
-      );
-      flame.position.y = 4.6;
+      g.add(this.flag(1.2, 4.2, -1.2, 0xf2c36d, 1.4));
+      const flame = new T.Mesh(new T.OctahedronGeometry(0.5), this.glowMat);
+      flame.position.y = 4.85;
       flame.name = 'flame';
       g.add(flame);
       const light = new T.PointLight(0xffc46a, 12, 12);
-      light.position.y = 4;
+      light.position.y = 4.2;
       light.name = 'flame-light';
       g.add(light);
     } else if (kind === 'wall') {
-      const b = this.box(
-        1.25,
-        1.5 + (level - 1) * 0.3,
-        1.25,
-        level >= 2 ? 0x8d9294 : 0xa2aa98,
-      );
-      b.position.y = (1.5 + (level - 1) * 0.3) / 2;
+      const h = 1.5 + (level - 1) * 0.3;
+      const b = this.box(1.25, h, 1.25, level >= 2 ? 0x8d9294 : 0xa2aa98);
+      b.position.y = h / 2;
       g.add(b);
-      for (const x of [-0.43, 0.43]) {
-        const c = this.box(0.35, 0.35, 1.25, level >= 2 ? 0xb3b7b5 : 0xc0c3ac);
-        c.position.set(x, 1.65 + (level - 1) * 0.3, 0);
-        g.add(c);
+      if (level >= 2)
+        for (const x of [-0.42, 0, 0.42]) {
+          const c = this.box(0.32, 0.3, 1.25, 0xb3b7b5);
+          c.position.set(x, h + 0.15, 0);
+          g.add(c);
+        }
+      else
+        for (const x of [-0.43, 0.43]) {
+          const c = this.box(0.35, 0.35, 1.25, 0xc0c3ac);
+          c.position.set(x, h + 0.15, 0);
+          g.add(c);
+        }
+      if (level >= 3)
+        for (const x of [-0.4, 0, 0.4]) {
+          const spike = new T.Mesh(
+            new T.ConeGeometry(0.08, 0.35, 4),
+            this.mat(0x4a4a48),
+          );
+          spike.position.set(x, h + 0.45, 0.5);
+          g.add(spike);
+        }
+      for (const x of [-0.3, 0.25]) {
+        const stone = this.box(
+          0.35,
+          0.2,
+          0.05,
+          level >= 2 ? 0x7c8283 : 0x939b8c,
+        );
+        stone.position.set(x, h * 0.4 + (x > 0 ? 0.3 : 0), 0.64);
+        g.add(stone);
       }
     } else if (kind === 'farm') {
-      const b = this.box(1.65, 1.2, 1.45, 0xd3b77f);
-      b.position.y = 0.6;
+      const soil = this.box(2.2, 0.12, 1.9, 0x5c4432);
+      soil.position.y = 0.06;
+      g.add(soil);
+      for (let r = 0; r < 3; r++)
+        for (let c = 0; c < 5; c++) {
+          const crop = new T.Mesh(
+            new T.ConeGeometry(0.08, 0.28 + level * 0.06, 4),
+            this.mat(level >= 2 ? 0xd9c46a : 0x8fb05a),
+          );
+          crop.position.set(-0.8 + c * 0.4, 0.26, -0.6 + r * 0.6);
+          crop.name = 'crop';
+          g.add(crop);
+        }
+      const b = this.box(1.0, 1.0, 0.9, 0xd3b77f);
+      b.position.set(-0.9, 0.5, 1.2);
       g.add(b);
-      const r = new T.Mesh(new T.ConeGeometry(1.5, 1.1, 4), this.mat(0xa45c3d));
+      const r = new T.Mesh(new T.ConeGeometry(0.9, 0.8, 4), this.mat(0xa45c3d));
       r.rotation.y = Math.PI / 4;
-      r.position.y = 1.65;
+      r.position.set(-0.9, 1.35, 1.2);
       g.add(r);
       const fan = new T.Group();
       fan.name = 'fan';
       for (let j = 0; j < 4; j++) {
-        const blade = this.box(0.18, 1.2, 0.08, 0xf3dfaf);
-        blade.position.y = 0.55;
+        const blade = this.box(0.16, 1.1, 0.06, 0xf3dfaf);
+        blade.position.y = 0.5;
         const pivot = new T.Group();
         pivot.rotation.z = (j * Math.PI) / 2;
         pivot.add(blade);
         fan.add(pivot);
       }
-      fan.position.set(0, 1.8, 0.9);
+      fan.position.set(-0.9, 1.5, 1.7);
       g.add(fan);
     } else if (kind === 'house') {
       const w = 1.3 + level * 0.15;
-      const b = this.box(
-        w,
-        0.9 + level * 0.25,
-        w,
-        level >= 3 ? 0xc9c2ae : 0xd9b98a,
-      );
-      b.position.y = (0.9 + level * 0.25) / 2;
+      const hh = 0.9 + level * 0.25;
+      const b = this.box(w, hh, w, level >= 3 ? 0xc9c2ae : 0xd9b98a);
+      b.position.y = hh / 2;
       g.add(b);
       const r = new T.Mesh(
         new T.ConeGeometry(w * 0.95, 0.9, 4),
         this.mat(level >= 2 ? 0x8a4a3a : 0xa45c3d),
       );
       r.rotation.y = Math.PI / 4;
-      r.position.y = 0.9 + level * 0.25 + 0.45;
+      r.position.y = hh + 0.45;
       g.add(r);
       const door = this.box(0.3, 0.45, 0.06, 0x4a3524);
       door.position.set(0, 0.23, w / 2 + 0.01);
       g.add(door);
+      for (const x of level >= 2 ? [-0.4, 0.4] : [0.4]) {
+        const win = this.window(0.22, 0.22);
+        win.position.set(x, hh * 0.65, w / 2 + 0.02);
+        g.add(win);
+      }
+      const chimney = this.box(0.22, 0.6, 0.22, 0x7c6a5a);
+      chimney.position.set(w * 0.3, hh + 0.55, -w * 0.25);
+      chimney.name = 'chimney';
+      g.add(chimney);
+      if (level >= 3) {
+        const fence = this.box(w + 0.6, 0.25, 0.06, 0x8a6a48);
+        fence.position.set(0, 0.15, w / 2 + 0.45);
+        g.add(fence);
+      }
     } else if (kind === 'sawmill') {
       const b = this.box(1.6, 0.9, 1.3, 0x8f6b48);
       b.position.y = 0.45;
@@ -386,9 +559,23 @@ export class GameScene {
       blade.position.set(0.9, 0.7, 0);
       blade.name = 'fan';
       g.add(blade);
-      const log = this.box(0.3, 0.3, 1.4, 0x7a5a3c);
-      log.position.set(-0.6, 1.2, 0);
-      g.add(log);
+      for (let i = 0; i < 3; i++) {
+        const log = new T.Mesh(
+          new T.CylinderGeometry(0.15, 0.15, 1.3, 6),
+          this.mat(0x7a5a3c),
+        );
+        log.rotation.x = Math.PI / 2;
+        log.position.set(
+          -0.55 + (i % 2) * 0.32,
+          0.15 + Math.floor(i / 2) * 0.28,
+          1.0,
+        );
+        g.add(log);
+      }
+      const chimney = this.box(0.2, 0.5, 0.2, 0x5a4a3a);
+      chimney.position.set(-0.6, 1.2, -0.4);
+      chimney.name = 'chimney';
+      g.add(chimney);
     } else if (kind === 'quarry' || kind === 'goldmine' || kind === 'mine') {
       const base = new T.Mesh(
         new T.DodecahedronGeometry(1),
@@ -409,9 +596,15 @@ export class GameScene {
       const hole = this.box(0.6, 0.7, 0.06, 0x1b1a17);
       hole.position.set(0, 0.35, 1.05);
       g.add(hole);
-      const cart = this.box(0.5, 0.3, 0.4, 0x4a3524);
-      cart.position.set(0.9, 0.15, 0.9);
-      g.add(cart);
+      const rail1 = this.box(0.04, 0.04, 1.6, 0x4a4a48),
+        rail2 = this.box(0.04, 0.04, 1.6, 0x4a4a48);
+      rail1.position.set(0.72, 0.02, 1.4);
+      rail2.position.set(1.08, 0.02, 1.4);
+      g.add(rail1, rail2);
+      const cart = new T.Group();
+      const body = this.box(0.5, 0.3, 0.4, 0x4a3524);
+      body.position.y = 0.2;
+      cart.add(body);
       const ore = new T.Mesh(
         new T.OctahedronGeometry(0.18),
         new T.MeshStandardMaterial({
@@ -425,20 +618,25 @@ export class GameScene {
           roughness: 0.4,
         }),
       );
-      ore.position.set(0.9, 0.4, 0.9);
-      g.add(ore);
+      ore.position.y = 0.42;
+      cart.add(ore);
+      cart.position.set(0.9, 0, 0.9);
+      cart.name = 'cart';
+      g.add(cart);
+      const lamp = new T.Mesh(new T.OctahedronGeometry(0.1), this.glowMat);
+      lamp.position.set(0.5, 1.1, 1.0);
+      g.add(lamp);
       for (let i = 1; i < level; i++) {
-        const lamp = new T.Mesh(
-          new T.OctahedronGeometry(0.1),
-          new T.MeshBasicMaterial({ color: 0xffc46a }),
-        );
-        lamp.position.set(-0.7 + i * 0.5, 1.15, 0.9);
-        g.add(lamp);
+        const extra = new T.Mesh(new T.OctahedronGeometry(0.1), this.glowMat);
+        extra.position.set(-0.7 + i * 0.5, 1.15, 0.9);
+        g.add(extra);
       }
     } else if (kind === 'bridge') {
-      const deck = this.box(2.4, 0.18, 2.4, 0x8a6a48);
-      deck.position.y = 0.32;
-      g.add(deck);
+      for (let i = 0; i < 6; i++) {
+        const plank = this.box(2.4, 0.12, 0.34, i % 2 ? 0x8a6a48 : 0x7d5f40);
+        plank.position.set(0, 0.32, -1.05 + i * 0.42);
+        g.add(plank);
+      }
       for (const x of [-1, 1]) {
         const rail = this.box(0.12, 0.5, 2.4, 0x5d4733);
         rail.position.set(x, 0.62, 0);
@@ -458,10 +656,19 @@ export class GameScene {
       r.rotation.y = Math.PI / 4;
       r.position.y = 1.25;
       g.add(r);
+      const win = this.window(0.22, 0.22);
+      win.position.set(0.25, 0.6, 0.51);
+      g.add(win);
+      const dock = this.box(0.6, 0.08, 1.6, 0x7d5f40);
+      dock.position.set(0.9, 0.12, 0.6);
+      g.add(dock);
       const rod = this.box(0.05, 1.6, 0.05, 0x3f3226);
-      rod.position.set(0.8, 0.9, 0.5);
+      rod.position.set(1.1, 0.8, 1.2);
       rod.rotation.z = -0.5;
       g.add(rod);
+      const net = this.box(0.7, 0.4, 0.03, 0x6b6b5a);
+      net.position.set(-0.4, 0.4, 0.52);
+      g.add(net);
     } else if (kind === 'barracks' || kind === 'archery' || kind === 'stable') {
       const col =
         kind === 'barracks'
@@ -479,29 +686,63 @@ export class GameScene {
       roof.rotation.y = Math.PI / 4;
       roof.position.y = 1.35;
       g.add(roof);
-      const pole = this.box(0.08, 1.8, 0.08, 0x3f3226);
-      pole.position.set(0.9, 1.2, -0.6);
-      g.add(pole);
-      const flag = this.box(
-        0.5,
-        0.3,
-        0.04,
-        branch === 'grow' && level > 1 ? 0xf2c36d : 0xa45c3d,
+      const door = this.box(0.5, 0.6, 0.06, 0x3f3226);
+      door.position.set(0, 0.3, 0.76);
+      g.add(door);
+      g.add(
+        this.flag(
+          0.9,
+          0.9,
+          -0.6,
+          branch === 'grow' && level > 1 ? 0xf2c36d : 0xa45c3d,
+          1.8,
+        ),
       );
-      flag.position.set(1.15, 1.95, -0.6);
-      g.add(flag);
+      if (kind === 'barracks') {
+        const dummy = this.box(0.18, 0.7, 0.18, 0x7a5a3c);
+        dummy.position.set(-1.3, 0.35, 0.6);
+        g.add(dummy);
+        const head = new T.Mesh(
+          new T.IcosahedronGeometry(0.15, 0),
+          this.mat(0xc9b28a),
+        );
+        head.position.set(-1.3, 0.85, 0.6);
+        g.add(head);
+        const arms = this.box(0.6, 0.08, 0.08, 0x7a5a3c);
+        arms.position.set(-1.3, 0.6, 0.6);
+        g.add(arms);
+      }
       if (kind === 'archery') {
+        const stand = this.box(0.08, 0.7, 0.08, 0x5d4733);
+        stand.position.set(-1.3, 0.35, 0.6);
+        g.add(stand);
         const targetRing = new T.Mesh(
-          new T.RingGeometry(0.2, 0.4, 12),
+          new T.RingGeometry(0.06, 0.34, 12),
           new T.MeshBasicMaterial({ color: 0xe8d8b0, side: T.DoubleSide }),
         );
-        targetRing.position.set(-0.8, 0.7, 0.78);
+        targetRing.position.set(-1.3, 0.75, 0.66);
         g.add(targetRing);
+        const bull = new T.Mesh(
+          new T.CircleGeometry(0.1, 10),
+          new T.MeshBasicMaterial({ color: 0xc44b3d }),
+        );
+        bull.position.set(-1.3, 0.75, 0.67);
+        g.add(bull);
       }
       if (kind === 'stable') {
-        const fence = this.box(1.6, 0.35, 0.08, 0x5d4733);
-        fence.position.set(0, 0.35, 1.0);
-        g.add(fence);
+        for (const z of [0.95, 1.35]) {
+          const fence = this.box(1.8, 0.06, 0.06, 0x5d4733);
+          fence.position.set(0, 0.25 + (z - 0.95), z);
+          g.add(fence);
+        }
+        for (const x of [-0.85, 0, 0.85]) {
+          const post = this.box(0.08, 0.5, 0.08, 0x5d4733);
+          post.position.set(x, 0.25, 1.15);
+          g.add(post);
+        }
+        const hay = this.box(0.5, 0.35, 0.5, 0xd9c46a);
+        hay.position.set(1.25, 0.18, 0.4);
+        g.add(hay);
       }
     } else if (kind === 'ballista') {
       const b = this.box(1.5, 1.2, 1.5, 0x9a9c8a);
@@ -515,34 +756,83 @@ export class GameScene {
       );
       top.position.y = 1.35;
       g.add(top);
+      const turret = new T.Group();
+      turret.name = 'turret';
       const arm = this.box(2.2, 0.18, 0.18, 0x67452c);
-      arm.position.y = 1.85;
-      g.add(arm);
+      arm.position.y = 0.5;
+      turret.add(arm);
       const rail = this.box(0.2, 0.2, 1.9, 0x403b32);
-      rail.position.set(0, 1.85, 0.2);
-      g.add(rail);
+      rail.position.set(0, 0.5, 0.2);
+      turret.add(rail);
       const bolt = this.box(
         0.1,
         0.1,
         1.2,
         branch === 'rapid' ? 0xe9bf6e : 0xd8d2c0,
       );
-      bolt.position.set(0, 2.0, 0.3);
-      g.add(bolt);
+      bolt.position.set(0, 0.65, 0.3);
+      bolt.name = 'bolt';
+      turret.add(bolt);
+      const string = new T.Line(
+        new T.BufferGeometry().setFromPoints([
+          new T.Vector3(-1.1, 0.5, 0),
+          new T.Vector3(0, 0.5, -0.6),
+          new T.Vector3(1.1, 0.5, 0),
+        ]),
+        new T.LineBasicMaterial({ color: 0xe8e2d0 }),
+      );
+      turret.add(string);
+      turret.position.y = 1.35;
+      g.add(turret);
     } else if (kind === 'shrine') {
-      const b = this.box(1.5, 0.4, 1.5, 0xb5b5a4);
+      const b = this.box(1.6, 0.4, 1.6, 0xb5b5a4);
       b.position.y = 0.2;
       g.add(b);
+      for (const [x, z] of [
+        [-0.6, -0.6],
+        [0.6, -0.6],
+        [-0.6, 0.6],
+        [0.6, 0.6],
+      ]) {
+        const pillar = this.box(0.16, 1.1, 0.16, 0xc9c9b6);
+        pillar.position.set(x, 0.95, z);
+        g.add(pillar);
+      }
       const stone = new T.Mesh(
-        new T.OctahedronGeometry(0.7),
-        this.mat(0x8cddad),
+        new T.OctahedronGeometry(0.55),
+        new T.MeshStandardMaterial({
+          color: 0x8cddad,
+          emissive: 0x2f8a5a,
+          emissiveIntensity: 0.8,
+          roughness: 0.3,
+        }),
       );
       stone.position.y = 1.4;
+      stone.name = 'crystal';
       g.add(stone);
+      const runes = new T.Mesh(
+        new T.RingGeometry(0.9, 1.05, 24),
+        new T.MeshBasicMaterial({
+          color: 0x8ee3b7,
+          side: T.DoubleSide,
+          transparent: true,
+          opacity: 0.6,
+        }),
+      );
+      runes.rotation.x = -Math.PI / 2;
+      runes.position.y = 0.42;
+      runes.name = 'runes';
+      g.add(runes);
+      const light = new T.PointLight(0x8ee3b7, 4, 6);
+      light.position.y = 1.5;
+      g.add(light);
     } else {
       const b = this.box(1.25, 1.8, 1.25, 0xaab39c);
       b.position.y = 0.9;
       g.add(b);
+      const win = this.window(0.16, 0.38);
+      win.position.set(0, 1.0, 0.64);
+      g.add(win);
       const top = this.box(
         1.7,
         0.35,
@@ -551,32 +841,70 @@ export class GameScene {
       );
       top.position.y = 1.95;
       g.add(top);
+      for (const [x, z] of [
+        [-0.7, -0.7],
+        [0.7, -0.7],
+        [-0.7, 0.7],
+        [0.7, 0.7],
+      ]) {
+        const merlon = this.box(0.3, 0.3, 0.3, 0xb8b09a);
+        merlon.position.set(x, 2.25, z);
+        g.add(merlon);
+      }
+      if (level >= 2)
+        g.add(
+          this.flag(
+            -0.6,
+            2.1,
+            -0.6,
+            branch === 'rapid' ? 0xe9bf6e : 0xa45c3d,
+            1.1,
+          ),
+        );
       if (kind === 'frost') {
         const crystal = new T.Mesh(
           new T.OctahedronGeometry(0.55),
-          this.mat(0x81d6e3),
+          new T.MeshStandardMaterial({
+            color: 0x81d6e3,
+            emissive: 0x2a7f9a,
+            emissiveIntensity: 0.9,
+            roughness: 0.2,
+          }),
         );
-        crystal.position.y = 2.55;
+        crystal.position.y = 2.7;
+        crystal.name = 'crystal';
         g.add(crystal);
+        const light = new T.PointLight(0x81d6e3, 4, 7);
+        light.position.y = 2.7;
+        g.add(light);
       } else {
+        const turret = new T.Group();
+        turret.name = 'turret';
         const bow = this.box(
           1.6,
-          0.2,
-          0.2,
+          0.16,
+          0.16,
           branch === 'rapid' ? 0xe9bf6e : 0x67452c,
         );
-        bow.position.y = 2.4;
-        g.add(bow);
-        const arrow = this.box(0.12, 0.12, 1.5, 0x403b32);
-        arrow.position.y = 2.4;
-        g.add(arrow);
+        bow.position.y = 0.45;
+        turret.add(bow);
+        const arrow = this.box(0.1, 0.1, 1.4, 0x403b32);
+        arrow.position.set(0, 0.5, 0.2);
+        arrow.name = 'bolt';
+        turret.add(arrow);
+        const guard = this.box(0.5, 0.5, 0.5, 0x8a6a48);
+        guard.position.set(0, 0.2, -0.3);
+        turret.add(guard);
+        turret.position.y = 2.0;
+        g.add(turret);
       }
     }
     return g;
   }
   character(color: number, enemy = false, kind = 'bow') {
     const g = new T.Group();
-    const body = this.box(enemy ? 0.7 : 0.52, enemy ? 0.65 : 0.75, 0.42, color);
+    const bodyW = enemy ? (kind === 'runner' ? 0.5 : 0.72) : 0.52;
+    const body = this.box(bodyW, enemy ? 0.65 : 0.75, 0.42, color);
     body.material = this.mat(color).clone();
     body.position.y = 0.75;
     body.name = 'body';
@@ -588,13 +916,34 @@ export class GameScene {
     head.position.y = 1.4;
     head.name = 'head';
     g.add(head);
+    for (const x of [-0.09, 0.09]) {
+      const eye = new T.Mesh(
+        new T.BoxGeometry(0.06, 0.06, 0.04),
+        enemy ? this.eyeMat : this.mat(0x1f1a16),
+      );
+      eye.position.set(x, 0.02, enemy ? 0.28 : 0.24);
+      head.add(eye);
+    }
     for (const [i, x] of [-0.18, 0.18].entries()) {
-      const leg = this.box(0.18, 0.45, 0.23, enemy ? 0x402b3a : 0x233b39);
+      const leg = this.box(
+        0.18,
+        enemy && kind === 'runner' ? 0.55 : 0.45,
+        0.23,
+        enemy ? 0x402b3a : 0x233b39,
+      );
       leg.position.set(x, 0.25, 0);
       leg.name = i === 0 ? 'legL' : 'legR';
       g.add(leg);
     }
     if (!enemy) {
+      const belt = this.box(0.56, 0.1, 0.46, 0x5a3f2a);
+      belt.position.y = 0.45;
+      g.add(belt);
+      for (const x of [-0.34, 0.34]) {
+        const pad = this.box(0.2, 0.14, 0.34, 0xd2b673);
+        pad.position.set(x, 1.12, 0);
+        g.add(pad);
+      }
       const cape = this.box(0.56, 0.75, 0.07, color);
       cape.position.set(0, 0.85, -0.25);
       cape.rotation.x = -0.2;
@@ -603,23 +952,129 @@ export class GameScene {
       const helmet = this.box(0.56, 0.18, 0.48, 0xd2b673);
       helmet.position.y = 1.58;
       g.add(helmet);
-      const weapon = this.box(
-        kind === 'bow' ? 0.1 : 0.12,
-        kind === 'sword' ? 0.85 : 1,
-        0.13,
-        kind === 'staff' ? 0x89d8d1 : 0xe2d2a7,
-      );
-      weapon.position.set(0.42, 0.8, 0.2);
-      weapon.rotation.z = -0.25;
+      const plume = this.box(0.08, 0.3, 0.3, color);
+      plume.position.set(0, 1.78, -0.05);
+      plume.rotation.x = 0.3;
+      g.add(plume);
+      const armL = this.box(0.16, 0.5, 0.16, 0xe8c39c);
+      armL.position.set(-0.36, 0.85, 0.05);
+      armL.name = 'armL';
+      g.add(armL);
+      const armR = new T.Group();
+      armR.position.set(0.36, 1.05, 0.05);
+      armR.name = 'armR';
+      const upper = this.box(0.16, 0.5, 0.16, 0xe8c39c);
+      upper.position.y = -0.2;
+      armR.add(upper);
+      const weapon = new T.Group();
       weapon.name = 'weapon';
-      g.add(weapon);
+      weapon.position.set(0.05, -0.35, 0.15);
+      if (kind === 'sword') {
+        const blade = this.box(0.08, 0.9, 0.03, 0xe6e2d8);
+        blade.position.y = 0.5;
+        weapon.add(blade);
+        const guard = this.box(0.32, 0.06, 0.08, 0xd2b673);
+        weapon.add(guard);
+        const hilt = this.box(0.07, 0.28, 0.07, 0x4a3524);
+        hilt.position.y = -0.16;
+        weapon.add(hilt);
+      } else if (kind === 'bow') {
+        for (const sgn of [-1, 1]) {
+          const limb = this.box(0.06, 0.55, 0.06, 0x8a6a48);
+          limb.position.set(0, sgn * 0.26, sgn * 0.12);
+          limb.rotation.x = -sgn * 0.45;
+          weapon.add(limb);
+        }
+        const string = new T.Line(
+          new T.BufferGeometry().setFromPoints([
+            new T.Vector3(0, 0.5, -0.1),
+            new T.Vector3(0, 0, -0.22),
+            new T.Vector3(0, -0.5, -0.1),
+          ]),
+          new T.LineBasicMaterial({ color: 0xe8e2d0 }),
+        );
+        weapon.add(string);
+      } else {
+        const pole = this.box(0.07, 1.2, 0.07, 0x5a3f2a);
+        pole.position.y = 0.2;
+        weapon.add(pole);
+        const crystal = new T.Mesh(
+          new T.OctahedronGeometry(0.16),
+          new T.MeshStandardMaterial({
+            color: 0x89d8d1,
+            emissive: 0x2a9a8f,
+            emissiveIntensity: 1.2,
+          }),
+        );
+        crystal.position.y = 0.9;
+        crystal.name = 'crystal';
+        weapon.add(crystal);
+      }
+      weapon.rotation.z = -0.25;
+      armR.add(weapon);
+      g.add(armR);
     } else {
-      for (const x of [-0.42, 0.42]) {
-        const arm = this.box(0.16, 0.5, 0.16, color);
-        arm.position.set(x, 0.85, 0.05);
+      for (const x of [-0.45, 0.45]) {
+        const arm = this.box(0.16, 0.55, 0.16, color);
+        arm.position.set(x, 0.8, 0.05);
         arm.name = x < 0 ? 'armL' : 'armR';
         g.add(arm);
+        for (let i = 0; i < 2; i++) {
+          const claw = new T.Mesh(
+            new T.ConeGeometry(0.04, 0.16, 4),
+            this.mat(0xe8e2d0),
+          );
+          claw.position.set(x + (i ? 0.05 : -0.05), 0.5, 0.12);
+          claw.rotation.x = Math.PI / 2;
+          g.add(claw);
+        }
       }
+      if (kind === 'brute' || kind === 'boss') {
+        for (const x of [-0.3, 0, 0.3]) {
+          const spike = new T.Mesh(
+            new T.ConeGeometry(0.08, 0.3, 4),
+            this.mat(0xe0d8c8),
+          );
+          spike.position.set(x, 1.15, -0.15);
+          spike.rotation.x = -0.5;
+          g.add(spike);
+        }
+        const club = this.box(0.16, 0.9, 0.16, 0x4a3524);
+        club.position.set(0.55, 0.9, 0.25);
+        club.rotation.z = -0.4;
+        club.name = 'weapon';
+        g.add(club);
+        const clubHead = this.box(0.32, 0.3, 0.32, 0x6b6b6b);
+        clubHead.position.set(0, 0.5, 0);
+        club.add(clubHead);
+      }
+      if (kind === 'boss') {
+        for (const x of [-0.16, 0.16]) {
+          const horn = new T.Mesh(
+            new T.ConeGeometry(0.08, 0.45, 5),
+            this.mat(0xe0d8c8),
+          );
+          horn.position.set(x, 0.25, 0);
+          horn.rotation.z = x < 0 ? 0.5 : -0.5;
+          head.add(horn);
+        }
+        const core = new T.Mesh(new T.OctahedronGeometry(0.16), this.eyeMat);
+        core.position.set(0, 0, 0.23);
+        core.name = 'core';
+        body.add(core);
+        const light = new T.PointLight(0xff5a5a, 3, 6);
+        light.position.y = 1;
+        g.add(light);
+      }
+      if (kind === 'runner') {
+        const tail = this.box(0.1, 0.1, 0.6, color);
+        tail.position.set(0, 0.55, -0.45);
+        tail.rotation.x = 0.4;
+        tail.name = 'tail';
+        g.add(tail);
+        body.rotation.x = 0.35;
+      }
+      if (kind === 'crawler') body.rotation.x = 0.2;
     }
     const base =
       kind === 'boss'
@@ -635,23 +1090,25 @@ export class GameScene {
   }
   soldier(kind: string, color: number) {
     const g = new T.Group();
+    const rider = new T.Group();
+    rider.name = 'rider';
     const body = this.box(
       0.42,
       0.6,
       0.34,
-      kind === 'knight' ? 0xb7bcc4 : 0x7d8f7a,
+      kind === 'knight' ? 0xb7bcc4 : kind === 'archer' ? 0x6f8a63 : 0x7d8f7a,
     );
     body.material = (body.material as T.MeshStandardMaterial).clone();
     body.position.y = 0.62;
     body.name = 'body';
-    g.add(body);
+    rider.add(body);
     const head = new T.Mesh(
       new T.IcosahedronGeometry(0.2, 0),
       this.mat(0xe8c39c),
     );
     head.position.y = 1.12;
     head.name = 'head';
-    g.add(head);
+    rider.add(head);
     const helm = this.box(
       0.44,
       0.14,
@@ -659,33 +1116,118 @@ export class GameScene {
       kind === 'knight' ? 0xd2b673 : 0x5a6b66,
     );
     helm.position.y = 1.26;
-    g.add(helm);
-    for (const [i, x] of [-0.14, 0.14].entries()) {
-      const leg = this.box(0.15, 0.36, 0.2, 0x3b4a45);
-      leg.position.set(x, 0.2, 0);
-      leg.name = i === 0 ? 'legL' : 'legR';
-      g.add(leg);
+    rider.add(helm);
+    if (kind === 'knight') {
+      const visor = this.box(0.44, 0.14, 0.1, 0x8d9294);
+      visor.position.set(0, 1.1, 0.18);
+      rider.add(visor);
     }
+    if (kind !== 'knight')
+      for (const [i, x] of [-0.14, 0.14].entries()) {
+        const leg = this.box(0.15, 0.36, 0.2, 0x3b4a45);
+        leg.position.set(x, 0.2, 0);
+        leg.name = i === 0 ? 'legL' : 'legR';
+        rider.add(leg);
+      }
     const tab = this.box(0.5, 0.08, 0.08, color);
     tab.position.set(0, 0.95, -0.2);
     tab.name = 'tab';
-    g.add(tab);
-    const weapon = this.box(
-      kind === 'archer' ? 0.08 : 0.1,
-      kind === 'knight' ? 1.1 : 0.8,
-      0.1,
-      kind === 'archer' ? 0x8a6a48 : 0xd8d2c0,
-    );
-    weapon.position.set(0.32, 0.7, 0.15);
-    weapon.rotation.z = -0.3;
-    weapon.name = 'weapon';
-    g.add(weapon);
-    if (kind === 'knight') {
-      const shield = this.box(0.08, 0.5, 0.4, 0xa45c3d);
-      shield.position.set(-0.32, 0.65, 0.05);
-      g.add(shield);
+    rider.add(tab);
+    const armL = this.box(0.13, 0.42, 0.13, 0xe8c39c);
+    armL.position.set(-0.3, 0.72, 0.05);
+    armL.name = 'armL';
+    rider.add(armL);
+    if (kind === 'archer') {
+      const quiver = this.box(0.12, 0.45, 0.12, 0x5a3f2a);
+      quiver.position.set(-0.15, 0.85, -0.25);
+      quiver.rotation.z = 0.3;
+      rider.add(quiver);
     }
-    const base = kind === 'knight' ? 1.15 : 1;
+    const armR = new T.Group();
+    armR.position.set(0.3, 0.9, 0.05);
+    armR.name = 'armR';
+    const upper = this.box(0.13, 0.42, 0.13, 0xe8c39c);
+    upper.position.y = -0.18;
+    armR.add(upper);
+    const weapon = new T.Group();
+    weapon.name = 'weapon';
+    weapon.position.set(0.04, -0.3, 0.12);
+    if (kind === 'archer') {
+      for (const sgn of [-1, 1]) {
+        const limb = this.box(0.05, 0.45, 0.05, 0x8a6a48);
+        limb.position.set(0, sgn * 0.22, sgn * 0.1);
+        limb.rotation.x = -sgn * 0.45;
+        weapon.add(limb);
+      }
+    } else if (kind === 'knight') {
+      const lance = this.box(0.06, 1.5, 0.06, 0xd8d2c0);
+      lance.position.y = 0.4;
+      weapon.add(lance);
+      const tip = new T.Mesh(
+        new T.ConeGeometry(0.06, 0.2, 4),
+        this.mat(0xe6e2d8),
+      );
+      tip.position.y = 1.2;
+      weapon.add(tip);
+    } else {
+      const spear = this.box(0.06, 1.1, 0.06, 0x8a6a48);
+      spear.position.y = 0.3;
+      weapon.add(spear);
+      const tip = new T.Mesh(
+        new T.ConeGeometry(0.06, 0.2, 4),
+        this.mat(0xe6e2d8),
+      );
+      tip.position.y = 0.95;
+      weapon.add(tip);
+      const shield = this.box(0.06, 0.45, 0.36, 0xa45c3d);
+      shield.position.set(-0.38, 0.7, 0.05);
+      rider.add(shield);
+    }
+    weapon.rotation.z = -0.3;
+    armR.add(weapon);
+    rider.add(armR);
+    if (kind === 'knight') {
+      const horse = new T.Group();
+      horse.name = 'horse';
+      const hb = this.box(0.5, 0.5, 1.2, 0x6b4a33);
+      hb.position.y = 0.7;
+      horse.add(hb);
+      const neck = this.box(0.26, 0.55, 0.3, 0x6b4a33);
+      neck.position.set(0, 1.05, 0.55);
+      neck.rotation.x = -0.6;
+      horse.add(neck);
+      const hh = this.box(0.24, 0.26, 0.45, 0x5a3d2a);
+      hh.position.set(0, 1.28, 0.85);
+      horse.add(hh);
+      const mane = this.box(0.08, 0.3, 0.5, 0x2f2118);
+      mane.position.set(0, 1.25, 0.45);
+      horse.add(mane);
+      const htail = this.box(0.08, 0.5, 0.08, 0x2f2118);
+      htail.position.set(0, 0.6, -0.65);
+      htail.rotation.x = 0.4;
+      htail.name = 'tail';
+      horse.add(htail);
+      const saddle = this.box(0.56, 0.1, 0.5, 0xa45c3d);
+      saddle.position.y = 0.97;
+      horse.add(saddle);
+      const names = ['hlegFL', 'hlegFR', 'hlegBL', 'hlegBR'];
+      let i = 0;
+      for (const z of [0.4, -0.4])
+        for (const x of [-0.18, 0.18]) {
+          const leg = this.box(0.14, 0.5, 0.14, 0x5a3d2a);
+          leg.position.set(x, 0.25, z);
+          leg.name = names[i++];
+          horse.add(leg);
+        }
+      g.add(horse);
+      rider.position.y = 0.9;
+      rider.scale.setScalar(0.85);
+      const shield = this.box(0.06, 0.45, 0.36, 0xa45c3d);
+      shield.position.set(-0.36, 0.7, 0.05);
+      rider.add(shield);
+    }
+    g.add(rider);
+    const base = kind === 'knight' ? 1.1 : 1;
     g.scale.setScalar(base);
     g.userData.baseScale = base;
     return g;
@@ -743,8 +1285,29 @@ export class GameScene {
     if (legR) legR.rotation.x = -swing;
     const armL = g.getObjectByName('armL'),
       armR = g.getObjectByName('armR');
-    if (armL) armL.rotation.x = -swing * 0.8;
-    if (armR) armR.rotation.x = swing * 0.8;
+    const at0 = (now - (d.attackAt ?? -9999)) / 200;
+    const swingHit = at0 < 1 ? Math.sin(at0 * Math.PI) : 0;
+    if (armL) armL.rotation.x = -swing * 0.8 + swingHit * 0.4;
+    if (armR) armR.rotation.x = swing * 0.8 - swingHit * 1.6;
+    const horse = g.getObjectByName('horse');
+    if (horse) {
+      const gallop = Math.sin(d.phase * 1.6) * 0.8 * d.walk;
+      for (const [i, n] of ['hlegFL', 'hlegFR', 'hlegBL', 'hlegBR'].entries()) {
+        const leg = horse.getObjectByName(n);
+        if (leg)
+          leg.rotation.x = (i < 2 ? gallop : -gallop) * (i % 2 ? 1 : 0.85);
+      }
+      horse.position.y = Math.abs(Math.sin(d.phase * 1.6)) * 0.12 * d.walk;
+      const rider = g.getObjectByName('rider');
+      if (rider) rider.position.y = 0.9 + horse.position.y;
+      const tail = horse.getObjectByName('tail');
+      if (tail) tail.rotation.x = 0.4 + Math.sin(now * 0.006) * 0.25;
+    }
+    const tail = g.getObjectByName('tail');
+    if (tail && !horse)
+      tail.rotation.y = Math.sin(d.phase * 2) * 0.5 * (0.3 + d.walk);
+    const core = g.getObjectByName('core');
+    if (core) core.scale.setScalar(1 + Math.sin(now * 0.008) * 0.25);
     const body = g.getObjectByName('body') as T.Mesh | undefined;
     const head = g.getObjectByName('head');
     const cape = g.getObjectByName('cape');
@@ -772,8 +1335,13 @@ export class GameScene {
     const weapon = g.getObjectByName('weapon');
     if (weapon) {
       const rest = d.weaponZ ?? (d.weaponZ = weapon.rotation.z);
-      weapon.rotation.z = rest - lunge * 1.1;
+      weapon.rotation.z = rest - lunge * (armR ? 0.5 : 1.1);
       weapon.rotation.x = -lunge * 0.6;
+      const crystal = weapon.getObjectByName('crystal');
+      if (crystal) {
+        crystal.rotation.y = now * 0.004;
+        crystal.scale.setScalar(1 + lunge * 0.8 + Math.sin(now * 0.006) * 0.1);
+      }
     }
     const born = Math.min(1, (now - d.born) / 260);
     const pop = born < 1 ? 1 + Math.sin(born * Math.PI) * 0.18 : 1;
@@ -781,6 +1349,86 @@ export class GameScene {
     const flinch = hitScale < 1 ? 1 + Math.sin(hitScale * Math.PI) * 0.1 : 1;
     const base = d.baseScale ?? 1;
     g.scale.setScalar(base * (0.2 + 0.8 * born) * pop * flinch);
+  }
+  puff(x: number, y: number, z: number, now: number) {
+    if (this.smokes.length > 60) return;
+    const m = new T.Mesh(this.smokeGeo, this.smokeMat.clone());
+    m.position.set(x, y, z);
+    m.scale.setScalar(0.5);
+    this.smokeGroup.add(m);
+    this.smokes.push({
+      m,
+      born: now,
+      life: 2200,
+      vx: (Math.random() - 0.5) * 0.2,
+      vz: (Math.random() - 0.5) * 0.2,
+    });
+  }
+  animateSmoke(now: number, dt: number) {
+    for (const sm of this.smokes.slice()) {
+      const t = (now - sm.born) / sm.life;
+      if (t >= 1) {
+        this.smokeGroup.remove(sm.m);
+        (sm.m.material as T.Material).dispose();
+        this.smokes.splice(this.smokes.indexOf(sm), 1);
+        continue;
+      }
+      sm.m.position.y += dt * 0.9;
+      sm.m.position.x += (sm.vx + 0.15) * dt;
+      sm.m.position.z += sm.vz * dt;
+      sm.m.scale.setScalar(0.5 + t * 1.6);
+      (sm.m.material as T.MeshStandardMaterial).opacity = 0.45 * (1 - t);
+    }
+  }
+  burst(x: number, z: number, now: number, color: number) {
+    const g = new T.Group();
+    g.position.set(x, this.y(x, z) + 0.2, z);
+    const ring = new T.Mesh(
+      new T.RingGeometry(0.4, 0.6, 28),
+      new T.MeshBasicMaterial({ color, side: T.DoubleSide, transparent: true }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.name = 'ring';
+    g.add(ring);
+    for (let i = 0; i < 10; i++) {
+      const spark = new T.Mesh(
+        new T.OctahedronGeometry(0.09),
+        new T.MeshBasicMaterial({ color: 0xfff1b8, transparent: true }),
+      );
+      spark.userData.a = (i / 10) * Math.PI * 2;
+      spark.userData.r = 0.6 + (i % 3) * 0.25;
+      g.add(spark);
+    }
+    this.scene.add(g);
+    this.bursts.push({ g, born: now });
+  }
+  animateBursts(now: number) {
+    for (const b of this.bursts.slice()) {
+      const t = (now - b.born) / 900;
+      if (t >= 1) {
+        this.scene.remove(b.g);
+        this.disposeGeometry(b.g, true);
+        this.bursts.splice(this.bursts.indexOf(b), 1);
+        continue;
+      }
+      for (const o of b.g.children) {
+        if (o.name === 'ring') {
+          const k = 1 + t * 4;
+          o.scale.set(k, k, 1);
+          ((o as T.Mesh).material as T.MeshBasicMaterial).opacity = 1 - t;
+        } else {
+          const a = o.userData.a as number,
+            r = (o.userData.r as number) * (0.3 + t * 2);
+          o.position.set(
+            Math.cos(a) * r,
+            Math.sin(t * Math.PI) * 1.6 + t * 0.4,
+            Math.sin(a) * r,
+          );
+          o.rotation.y = now * 0.01;
+          ((o as T.Mesh).material as T.MeshBasicMaterial).opacity = 1 - t * t;
+        }
+      }
+    }
   }
   animateDying(now: number) {
     for (const item of this.dying.slice()) {
@@ -850,6 +1498,9 @@ export class GameScene {
     this.sun.position.set(this.follow.x - 16, 30, this.follow.z + 12);
     this.sun.target.position.set(this.follow.x, 0, this.follow.z);
     this.sun.target.updateMatrixWorld();
+    this.windowMat.emissiveIntensity = 0.15 + this.night * 1.6;
+    this.glowMat.emissiveIntensity =
+      1.2 + this.night * 1.2 + Math.sin(now * 0.02) * 0.2;
     const keep = w.buildings[0];
     if (keep && keep.hp < this.lastKeepHp - 0.01) this.shakeAt = now;
     this.lastKeepHp = keep ? keep.hp : Infinity;
@@ -903,8 +1554,64 @@ export class GameScene {
       const d = g.userData;
       if (b.hp < d.lastHp - 0.01) d.hitAt = now;
       d.lastHp = b.hp;
+      if (b.cool > (d.lastCool ?? 0) + 0.05) d.fireAt = now;
+      d.lastCool = b.cool;
       const fan = g.getObjectByName('fan');
       if (fan) fan.rotation.z += dt;
+      const flag = g.getObjectByName('flag');
+      if (flag) flag.rotation.y = Math.sin(now * 0.004 + b.x) * 0.35;
+      const cart = g.getObjectByName('cart');
+      if (cart) cart.position.z = 0.9 + Math.sin(now * 0.0015 + b.z) * 0.55;
+      const turret = g.getObjectByName('turret');
+      if (turret) {
+        const e = w.enemies.length
+          ? w.enemies.reduce((best, en) =>
+              dist(b, en) < dist(b, best) ? en : best,
+            )
+          : null;
+        if (e && dist(b, e) < 14) {
+          const want = Math.atan2(e.x - b.x, e.z - b.z);
+          turret.rotation.y +=
+            Math.atan2(
+              Math.sin(want - turret.rotation.y),
+              Math.cos(want - turret.rotation.y),
+            ) * Math.min(1, dt * 8);
+        }
+        const ft = (now - (d.fireAt ?? -9999)) / 260;
+        const recoil = ft < 1 ? Math.sin(ft * Math.PI) : 0;
+        turret.position.z = -recoil * 0.25;
+        const bolt = turret.getObjectByName('bolt');
+        if (bolt) bolt.visible = ft > 0.55 || ft >= 1;
+      }
+      const crystal = g.getObjectByName('crystal');
+      if (crystal) {
+        crystal.rotation.y = now * 0.0015;
+        crystal.position.y =
+          (d.crystalY ?? (d.crystalY = crystal.position.y)) +
+          Math.sin(now * 0.003 + b.x) * 0.12;
+      }
+      const runes = g.getObjectByName('runes');
+      if (runes) {
+        runes.rotation.z = now * 0.0008;
+        const near = w.players.some((p) => p.dead <= 0 && dist(p, b) < 5);
+        const k = near ? 1 + Math.sin(now * 0.008) * 0.12 : 1;
+        runes.scale.set(k, k, 1);
+      }
+      const torchAt = now * 0.02 + b.x * 3;
+      g.traverse((o) => {
+        if (o.name === 'torch')
+          o.scale.setScalar(0.85 + Math.sin(torchAt + o.position.x * 7) * 0.2);
+      });
+      const chimney = g.getObjectByName('chimney');
+      if (
+        chimney &&
+        w.phase !== 'over' &&
+        now - (d.smokeAt ?? 0) > 900 + (b.x % 3) * 200
+      ) {
+        d.smokeAt = now;
+        const wp = chimney.getWorldPosition(new T.Vector3());
+        this.puff(wp.x, wp.y + 0.3, wp.z, now);
+      }
       const flame = g.getObjectByName('flame');
       if (flame) {
         const f =
@@ -971,6 +1678,12 @@ export class GameScene {
       g.rotation.y = u.angle;
       g.visible = !isPlayer || u.dead <= 0;
       this.animateUnit(g, u, now, dt);
+      if (isPlayer) {
+        const prev = this.lastLevel.get(u.id);
+        if (prev !== undefined && u.level > prev)
+          this.burst(u.x, u.z, now, u.color);
+        this.lastLevel.set(u.id, u.level);
+      }
       const ring = g.getObjectByName('ring');
       if (ring) {
         const k = 1 + Math.sin(now * 0.005) * 0.07;
@@ -1017,6 +1730,8 @@ export class GameScene {
         });
       }
     this.animateDying(now);
+    this.animateSmoke(now, dt);
+    this.animateBursts(now);
     this.clearDynamic(this.effects);
     for (const e of w.effects) {
       const color =
@@ -1229,6 +1944,12 @@ export class GameScene {
     this.gemMeshes.clear();
     this.terrainMeshes.clear();
     this.dying = [];
+    this.smokes = [];
+    this.bursts = [];
+    this.smokeGeo.dispose();
+    this.windowMat.dispose();
+    this.glowMat.dispose();
+    this.eyeMat.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
