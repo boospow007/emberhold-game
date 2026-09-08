@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `squad` integer DEFAULT 0 NOT NULL;
