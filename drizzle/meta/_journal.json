@@ -22,6 +22,13 @@
       "when": 1788862941191,
       "tag": "0002_chief_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788863502670,
+      "tag": "0003_smart_microbe",
+      "breakpoints": true
     }
   ]
 }

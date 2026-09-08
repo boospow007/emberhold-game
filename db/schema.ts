@@ -7,6 +7,7 @@ export const profiles = sqliteTable('profiles', {
   vitality: integer('vitality').notNull().default(0),
   unlocks: text('unlocks').notNull().default('[]'),
   best: integer('best').notNull().default(0),
+  squad: integer('squad').notNull().default(0),
 });
 export const rooms = sqliteTable(
   'rooms',

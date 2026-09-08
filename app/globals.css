@@ -499,6 +499,9 @@ input {
   background: #0d191b !important;
   border-radius: 9px;
 }
+.build-tabs {
+  flex-wrap: wrap;
+}
 .build-tabs button {
   font-size: 14px;
   padding: 9px 12px;
@@ -975,6 +978,51 @@ input {
   gap: 3px;
   font-style: normal;
   color: #d9c58a;
+}
+.squad-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid #ffffff2a;
+  background: #172426e6;
+  color: #edf0e5;
+  font-size: 13px;
+}
+.squad-button span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  text-align: left;
+}
+.squad-button small {
+  font-size: 10px;
+  color: #b8c9b5;
+}
+.squad-button.active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.squad-button:disabled {
+  opacity: 0.5;
+}
+.squad-icons {
+  display: inline-flex;
+  gap: 4px;
+  font-style: normal;
+}
+.squad-icons b {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #ffffff14;
+  color: #edf0e5;
+}
+.unit-dot {
+  width: 3px;
+  height: 3px;
+  background: #9edca2;
 }
 .keep-health {
   position: absolute;

@@ -23,7 +23,7 @@ npm run db:generate                # drizzle-kit generate -> drizzle/*.sql
 Tests use `node:test`, no test runner package:
 
 ```bash
-node --experimental-strip-types --test tests/engine.test.mjs tests/terrain.test.mjs   # pure engine, no server
+node --experimental-strip-types --test tests/engine.test.mjs tests/terrain.test.mjs tests/units.test.mjs   # pure engine, no server
 node --experimental-strip-types --test tests/coop.test.mjs                            # needs dev server running
 ```
 
@@ -40,7 +40,7 @@ node --experimental-strip-types --test --test-name-pattern="respawns" tests/engi
 Local D1 state lives in `.wrangler/state/v3/d1`. The `drizzle/*.sql` migrations must be applied there before the API works; Sites applies them automatically on deploy. There is no migrations table locally, so apply a new migration directly to the Miniflare SQLite file (`wrangler d1 execute` with `dist/server/wrangler.json` targets a different persist path and will not work):
 
 ```bash
-sed 's/--> statement-breakpoint//g' drizzle/0002_chief_shatterstar.sql | sqlite3 .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite
+sed 's/--> statement-breakpoint//g' drizzle/0003_smart_microbe.sql | sqlite3 .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite
 ```
 
 The Worker bindings (D1 as `DB`) are declared inline in `vite.config.ts` from `.openai/hosting.json`, not in a root `wrangler.toml`.
@@ -51,7 +51,7 @@ The game is split into four layers that must stay separate:
 
 **`lib/game/terrain.ts` generates the world from a seed.** Heightmap (water / plain / hill / mountain), river with fords, lakes, and obstacle placement all derive from `(seed, map)` with a deterministic PRNG. Heights are never serialized: `terrainOf()` caches them per client, and only the mutable obstacle list travels in the `World`. Never use `Math.random` in generation code.
 
-**`lib/game/engine.ts` is the authoritative, pure simulation.** It has no React, DOM, or Three.js imports and is what the tests exercise. Key exports: `newWorld`, `addPlayer`, `command`, `canBuild`, `startWave`, `step(world, inputs, dt)`, `reward`, plus the `MAPS` and `BUILDINGS` data tables. `command()` returns an empty string on success or a Thai error message on rejection; callers show that string as a toast. The `World` object is plain JSON so it can be serialized as a room snapshot.
+**`lib/game/engine.ts` is the authoritative, pure simulation.** It has no React, DOM, or Three.js imports and is what the tests exercise. Key exports: `newWorld`, `addPlayer`, `command`, `canBuild`, `startWave`, `step(world, inputs, dt)`, `reward`, plus the `MAPS`, `BUILDINGS` and `UNITS` data tables. Soldiers live in `world.units`, belong to a barracks (`home`), and are either `hold` (guarding a post) or `follow` (in a player's squad, capped by `player.stack`); `rally`/`release` commands are allowed in battle, build/upgrade are prep-only. `command()` returns an empty string on success or a Thai error message on rejection; callers show that string as a toast. The `World` object is plain JSON so it can be serialized as a room snapshot.
 
 **`lib/game/scene.ts` is render-only.** `GameScene` builds Three.js meshes from a `World` each frame via `render(world, localId, placement)`. It never mutates game state. It also owns pointer-to-world raycasting (`point`) and cleanup (`dispose`).
 

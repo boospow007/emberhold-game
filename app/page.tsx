@@ -48,6 +48,9 @@ import {
   randomSeed,
   normalizeSeed,
   weeklySeed,
+  squadCost,
+  MAX_SQUAD,
+  BASE_STACK,
 } from '@/lib/game/engine';
 import Game, { Session } from './Game';
 type Room = { code: string; host: boolean; map: MapId; seed: string };
@@ -688,27 +691,41 @@ export default function Home() {
               [
                 ['power', 'ฝึกฝนการต่อสู้', 'พลังโจมตีเริ่มต้น +8% ต่อระดับ', Swords],
                 ['vitality', 'หัวใจผู้พิทักษ์', 'HP เริ่มต้น +15 ต่อระดับ', Heart],
+                [
+                  'squad',
+                  'ขยายกองกำลัง',
+                  `พาทหารไปด้วยได้ ${BASE_STACK} + ระดับ นาย`,
+                  Users,
+                ],
                 ['frost', 'ปลดล็อกป้อมเวท', 'สร้างป้อมโจมตีและชะลอศัตรู', Snowflake],
                 ['shrine', 'ปลดล็อกศาลาฟื้นฟู', 'สร้างอาคารฟื้นฟูผู้เล่นในระยะ', Flame],
               ] as const
             ).map(([key, title, desc, Icon]) => {
-              const isLevel = key === 'power' || key === 'vitality',
-                level = isLevel
-                  ? (key === 'power' || key === 'vitality'
-                      ? profile?.[key]
-                      : 0) || 0
-                  : 0,
+              const isLevel =
+                  key === 'power' || key === 'vitality' || key === 'squad',
+                level = isLevel ? profile?.[key] || 0 : 0,
+                maxLevel = key === 'squad' ? MAX_SQUAD : 10,
                 unlocked = isLevel
-                  ? level >= 10
+                  ? level >= maxLevel
                   : profile?.unlocks.includes(key),
-                cost = isLevel ? 30 + level * 25 : key === 'frost' ? 60 : 90;
+                cost = isLevel
+                  ? key === 'squad'
+                    ? squadCost(level)
+                    : 30 + level * 25
+                  : key === 'frost'
+                    ? 60
+                    : 90;
               return (
                 <div key={key}>
                   <Icon />
                   <span>
                     <b>{title}</b>
                     <small>{desc}</small>
-                    {isLevel && <small>ระดับ {level}/10</small>}
+                    {isLevel && (
+                      <small>
+                        ระดับ {level}/{maxLevel}
+                      </small>
+                    )}
                   </span>
                   <button
                     className={unlocked ? 'secondary' : 'primary'}

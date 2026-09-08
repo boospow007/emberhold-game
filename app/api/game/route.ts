@@ -2,6 +2,8 @@ import { database } from '@/db/raw';
 import {
   reward,
   normalizeSeed,
+  MAX_SQUAD,
+  squadCost,
   type World,
   type Profile,
   type MapId,
@@ -106,10 +108,11 @@ export async function POST(req: Request) {
     if (b.action === 'purchase') {
       let cost = 0,
         sql = '';
-      if (b.item === 'power' || b.item === 'vitality') {
-        if (profile[b.item] >= 10)
+      if (b.item === 'power' || b.item === 'vitality' || b.item === 'squad') {
+        const level = profile[b.item] || 0;
+        if (level >= (b.item === 'squad' ? MAX_SQUAD : 10))
           return result({ error: 'อัปเกรดเต็มแล้ว' }, 400);
-        cost = 30 + profile[b.item] * 25;
+        cost = b.item === 'squad' ? squadCost(level) : 30 + level * 25;
         sql = `UPDATE profiles SET ${b.item}=${b.item}+1,points=points-? WHERE id=? AND points>=?`;
       } else if (['frost', 'shrine'].includes(b.item)) {
         cost = b.item === 'frost' ? 60 : 90;
@@ -364,7 +367,9 @@ export async function POST(req: Request) {
                     (c) =>
                       Number.isSafeInteger(c.seq) &&
                       c.seq > 0 &&
-                      ['build', 'upgrade', 'perk'].includes(c.type),
+                      ['build', 'upgrade', 'perk', 'rally', 'release'].includes(
+                        c.type,
+                      ),
                   )
                   .slice(-8)
               : [],
@@ -389,7 +394,9 @@ export async function POST(req: Request) {
             !valid(s.run, 60) ||
             !valid(s.seed, 8) ||
             !Array.isArray(s.terrain) ||
-            s.terrain.length > 400
+            s.terrain.length > 400 ||
+            !Array.isArray(s.units) ||
+            s.units.length > 80
           )
             return result({ error: 'สถานะเกมไม่ถูกต้อง' }, 400);
           await db

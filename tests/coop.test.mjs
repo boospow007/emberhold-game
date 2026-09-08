@@ -83,7 +83,7 @@ test('room discovery, joins, replicated input/builds, room limit and host author
     await host('sync', { code: r.code, snapshot: world, input: {} });
     const g = await guest('sync', { code: r.code, input: {} });
     assert.equal(g.snapshot.buildings.length, 2);
-    assert.equal(g.snapshot.res.wood, 35);
+    assert.equal(g.snapshot.res.gold, 45); // heroes near trees may auto-chop, so check gold
     assert.equal(g.snapshot.acks[gp.id], 1);
     const fake = { ...world, res: { ...world.res, gold: 999999 } };
     await guest('sync', { code: r.code, snapshot: fake, input: {} });

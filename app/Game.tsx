@@ -31,6 +31,9 @@ import {
   Fish,
   Waypoints,
   Bookmark,
+  Tent,
+  Flag,
+  Footprints,
 } from 'lucide-react';
 import {
   Dialog,
@@ -69,6 +72,8 @@ import {
   buildGate,
   buildError,
   upgradeError,
+  following,
+  UNITS,
 } from '@/lib/game/engine';
 import { api } from '@/lib/game/api';
 export type Session = {
@@ -99,6 +104,9 @@ const BUILD_ICON: Record<BuildKind, typeof Coins> = {
   ballista: Crosshair,
   bridge: Waypoints,
   fisher: Fish,
+  barracks: Tent,
+  archery: Target,
+  stable: Flag,
 };
 function CostChips({
   cost,
@@ -220,6 +228,7 @@ export default function Game({
           ...w,
           players: w.players.map((p) => ({ ...p })),
           buildings: w.buildings.map((b) => ({ ...b })),
+          units: w.units.map((u) => ({ ...u })),
         });
       }
       frame = requestAnimationFrame(animate);
@@ -374,7 +383,11 @@ export default function Game({
       : null,
     nearKeep = !!me && !!keep && dist(me, keep) < 6,
     cap = workerCap(hud),
-    used = workersUsed(hud);
+    used = workersUsed(hud),
+    squad = following(hud, id),
+    idleNear = me
+      ? hud.units.filter((u) => u.mode === 'hold' && dist(u, me) < 9).length
+      : 0;
   function setPlacement(p: typeof place) {
     placement.current = p;
     setPlace(p);
@@ -547,6 +560,16 @@ export default function Game({
             }}
           />
         ))}
+        {hud.units.map((u) => (
+          <i
+            key={u.id}
+            className="unit-dot"
+            style={{
+              left: 50 + (u.x / HALF) * 48 + '%',
+              top: 50 + (u.z / HALF) * 48 + '%',
+            }}
+          />
+        ))}
         {hud.enemies.map((e) => (
           <i
             key={e.id}
@@ -695,6 +718,45 @@ export default function Game({
                 </span>
               </>
             )}
+            {(hud.units.length > 0 || squad.length > 0) && me && (
+              <button
+                className={'squad-button' + (squad.length ? ' active' : '')}
+                disabled={squad.length === 0 && idleNear === 0}
+                onClick={() =>
+                  send({ type: squad.length ? 'release' : 'rally' })
+                }
+              >
+                {squad.length ? <Footprints size={18} /> : <Flag size={18} />}
+                <span>
+                  {squad.length ? 'ปลดทหาร' : 'รวมพล'}
+                  <small>
+                    {squad.length}/{me.stack}
+                    {squad.length === 0 && idleNear > 0
+                      ? ` · ว่าง ${idleNear}`
+                      : ''}
+                  </small>
+                </span>
+                {squad.length > 0 && (
+                  <i className="squad-icons">
+                    {(['infantry', 'archer', 'knight'] as const)
+                      .map(
+                        (k) =>
+                          [
+                            k,
+                            squad.filter((u) => u.kind === k).length,
+                          ] as const,
+                      )
+                      .filter(([, n]) => n > 0)
+                      .map(([k, n]) => (
+                        <b key={k}>
+                          {UNITS[k].name.slice(0, 1)}
+                          {n}
+                        </b>
+                      ))}
+                  </i>
+                )}
+              </button>
+            )}
             {(me?.picks || 0) > 0 && (
               <button className="perk-button" onClick={() => openPanel('perk')}>
                 <Sparkles size={21} />
@@ -775,58 +837,64 @@ export default function Game({
                 <TabsTrigger value="defense">ป้องกัน</TabsTrigger>
                 <TabsTrigger value="economy">เศรษฐกิจ</TabsTrigger>
                 <TabsTrigger value="housing">ที่พัก</TabsTrigger>
+                <TabsTrigger value="army">กองทัพ</TabsTrigger>
               </TabsList>
-              {(['defense', 'economy', 'housing'] as const).map((tab) => (
-                <TabsContent value={tab} key={tab}>
-                  <div className="build-options">
-                    {(
-                      Object.entries(BUILDINGS) as [
-                        BuildKind,
-                        (typeof BUILDINGS)[BuildKind],
-                      ][]
-                    )
-                      .filter(([, b]) => b.tab === tab)
-                      .map(([key, b]) => {
-                        const reason = me
-                          ? buildGate(hud, me, key)
-                          : 'กำลังโหลด';
-                        const Icon = BUILD_ICON[key];
-                        return (
-                          <button
-                            key={key}
-                            disabled={!!reason || hud.phase !== 'prep'}
-                            onClick={() => chooseBuild(key)}
-                          >
-                            <Icon />
-                            <span>
-                              <b>
-                                {b.name}
-                                {b.tier > 1 && (
-                                  <small className="tier"> ฐาน L{b.tier}</small>
-                                )}
-                              </b>
-                              <small>{reason || b.desc}</small>
-                            </span>
-                            <strong>
-                              {reason === 'ยังไม่ได้ปลดล็อก' ? (
-                                <Lock size={17} />
-                              ) : (
-                                <>
-                                  <CostChips cost={b.cost} res={hud.res} />
-                                  {b.workers > 0 && (
-                                    <small className="worker-cost">
-                                      <Users size={11} /> {b.workers}
+              {(['defense', 'economy', 'housing', 'army'] as const).map(
+                (tab) => (
+                  <TabsContent value={tab} key={tab}>
+                    <div className="build-options">
+                      {(
+                        Object.entries(BUILDINGS) as [
+                          BuildKind,
+                          (typeof BUILDINGS)[BuildKind],
+                        ][]
+                      )
+                        .filter(([, b]) => b.tab === tab)
+                        .map(([key, b]) => {
+                          const reason = me
+                            ? buildGate(hud, me, key)
+                            : 'กำลังโหลด';
+                          const Icon = BUILD_ICON[key];
+                          return (
+                            <button
+                              key={key}
+                              disabled={!!reason || hud.phase !== 'prep'}
+                              onClick={() => chooseBuild(key)}
+                            >
+                              <Icon />
+                              <span>
+                                <b>
+                                  {b.name}
+                                  {b.tier > 1 && (
+                                    <small className="tier">
+                                      {' '}
+                                      ฐาน L{b.tier}
                                     </small>
                                   )}
-                                </>
-                              )}
-                            </strong>
-                          </button>
-                        );
-                      })}
-                  </div>
-                </TabsContent>
-              ))}
+                                </b>
+                                <small>{reason || b.desc}</small>
+                              </span>
+                              <strong>
+                                {reason === 'ยังไม่ได้ปลดล็อก' ? (
+                                  <Lock size={17} />
+                                ) : (
+                                  <>
+                                    <CostChips cost={b.cost} res={hud.res} />
+                                    {b.workers > 0 && (
+                                      <small className="worker-cost">
+                                        <Users size={11} /> {b.workers}
+                                      </small>
+                                    )}
+                                  </>
+                                )}
+                              </strong>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </TabsContent>
+                ),
+              )}
             </Tabs>
           )}
           {(panel === 'upgrade' || panel === 'keep') && selected && me && (

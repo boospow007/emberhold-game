@@ -33,7 +33,11 @@ export type BuildKind =
   | 'shrine'
   | 'ballista'
   | 'bridge'
-  | 'fisher';
+  | 'fisher'
+  | 'barracks'
+  | 'archery'
+  | 'stable';
+export type UnitKind = 'infantry' | 'archer' | 'knight';
 export type Profile = {
   id: string;
   name: string;
@@ -42,6 +46,7 @@ export type Profile = {
   vitality: number;
   unlocks: string[];
   best: number;
+  squad?: number;
 };
 export type Unit = {
   id: string;
@@ -65,6 +70,7 @@ export type Player = Unit & {
   color: number;
   unlocks: string[];
   task: '' | 'chop';
+  stack: number;
 };
 export type Enemy = Unit & {
   kind: string;
@@ -76,6 +82,15 @@ export type Building = Unit & {
   kind: BuildKind | 'keep';
   level: number;
   branch: string;
+};
+export type Soldier = Unit & {
+  kind: UnitKind;
+  home: string;
+  owner: string;
+  mode: 'follow' | 'hold';
+  px: number;
+  pz: number;
+  slot: number;
 };
 export type Effect = {
   id: number;
@@ -89,7 +104,7 @@ export type Effect = {
 export type Gem = { id: number; x: number; z: number; value: number };
 export type Command = {
   seq: number;
-  type: 'build' | 'upgrade' | 'next' | 'perk';
+  type: 'build' | 'upgrade' | 'next' | 'perk' | 'rally' | 'release';
   kind?: BuildKind;
   x?: number;
   z?: number;
@@ -110,6 +125,7 @@ export type World = {
   players: Player[];
   enemies: Enemy[];
   buildings: Building[];
+  units: Soldier[];
   terrain: Obstacle[];
   terrainVersion: number;
   effects: Effect[];
@@ -162,12 +178,53 @@ export type BuildInfo = {
   cost: Cost;
   hp: number;
   desc: string;
-  tab: 'defense' | 'economy' | 'housing';
+  tab: 'defense' | 'economy' | 'housing' | 'army';
   tier: number;
   workers: number;
   node?: ObstacleKind;
   water?: 'on' | 'near';
   upgrades?: Cost[];
+  unit?: UnitKind;
+};
+export const UNITS: Record<
+  UnitKind,
+  {
+    name: string;
+    hp: number;
+    damage: number;
+    range: number;
+    cool: number;
+    speed: number;
+    workers: number;
+  }
+> = {
+  infantry: {
+    name: 'ทหารราบ',
+    hp: 90,
+    damage: 12,
+    range: 1.3,
+    cool: 0.8,
+    speed: 4.4,
+    workers: 1,
+  },
+  archer: {
+    name: 'นักธนู',
+    hp: 55,
+    damage: 9,
+    range: 7,
+    cool: 0.7,
+    speed: 4.4,
+    workers: 1,
+  },
+  knight: {
+    name: 'อัศวิน',
+    hp: 180,
+    damage: 22,
+    range: 1.5,
+    cool: 0.9,
+    speed: 5.2,
+    workers: 2,
+  },
 };
 export const BUILDINGS: Record<BuildKind, BuildInfo> = {
   house: {
@@ -297,7 +354,40 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     workers: 0,
     water: 'near',
   },
+  barracks: {
+    name: 'ค่ายทหารราบ',
+    cost: { wood: 35, gold: 20 },
+    hp: 200,
+    desc: 'ทหารราบ 1 นายต่อระดับ ประชิด • ฟื้นตอนเช้าถ้าค่ายยังอยู่',
+    tab: 'army',
+    tier: 1,
+    workers: 1,
+    unit: 'infantry',
+  },
+  archery: {
+    name: 'ค่ายธนู',
+    cost: { wood: 45, gold: 30 },
+    hp: 180,
+    desc: 'นักธนู 1 นายต่อระดับ ยิงไกล เลือดน้อย',
+    tab: 'army',
+    tier: 2,
+    workers: 1,
+    unit: 'archer',
+  },
+  stable: {
+    name: 'ค่ายอัศวิน',
+    cost: { iron: 20, gold: 60, food: 30 },
+    hp: 240,
+    desc: 'อัศวิน 1 นายต่อระดับ เร็ว เลือดหนา ใช้คนงาน 2',
+    tab: 'army',
+    tier: 3,
+    workers: 2,
+    unit: 'knight',
+  },
 };
+export const BASE_STACK = 2;
+export const MAX_SQUAD = 8;
+export const squadCost = (level: number) => 80 + level * 60;
 export const KEEP_MAX = 4;
 export const KEEP_UPGRADES: Cost[] = [
   { wood: 60, stone: 30 },
@@ -347,7 +437,11 @@ export function workerCap(w: World) {
 }
 export function workersUsed(w: World) {
   return w.buildings.reduce(
-    (s, b) => s + (b.kind === 'keep' ? 0 : BUILDINGS[b.kind].workers),
+    (s, b) =>
+      s +
+      (b.kind === 'keep'
+        ? 0
+        : BUILDINGS[b.kind].workers * (BUILDINGS[b.kind].unit ? b.level : 1)),
     0,
   );
 }
@@ -417,6 +511,7 @@ export function newWorld(map: MapId, seed?: string): World {
         branch: '',
       },
     ],
+    units: [],
     terrain: generateObstacles(s, map),
     terrainVersion: 0,
     effects: [],
@@ -451,7 +546,32 @@ export function addPlayer(w: World, profile: Profile, weapon: Weapon) {
     color: COLORS[i % 4],
     unlocks: profile.unlocks,
     task: '',
+    stack: BASE_STACK + Math.min(MAX_SQUAD, profile.squad || 0),
   });
+}
+function spawnSoldier(w: World, b: Building, slot: number) {
+  const kind = BUILDINGS[b.kind as BuildKind].unit!;
+  const u = UNITS[kind];
+  const a = (slot * 2.1 + b.level) % (Math.PI * 2);
+  w.units.push({
+    id: 'u' + ++w.serial,
+    kind,
+    home: b.id,
+    owner: '',
+    mode: 'hold',
+    x: b.x + Math.cos(a) * 1.6,
+    z: b.z + Math.sin(a) * 1.6,
+    px: b.x + Math.cos(a) * 1.6,
+    pz: b.z + Math.sin(a) * 1.6,
+    slot,
+    hp: u.hp,
+    maxHp: u.hp,
+    cool: 0,
+    angle: 0,
+  });
+}
+export function following(w: World, pid: string) {
+  return w.units.filter((u) => u.mode === 'follow' && u.owner === pid);
 }
 export function canBuild(w: World, kind: BuildKind, x: number, z: number) {
   const r = kind === 'wall' ? 0.7 : 1.05;
@@ -529,6 +649,12 @@ export function upgradeError(w: World, p: Player, b: Building, branch: string) {
       return `ต้องอัปเกรดฐานแม่เป็นระดับ ${b.level + 1} ก่อน`;
   }
   if (!branches(b.kind).includes(branch)) return 'เลือกสายอัปเกรด';
+  if (
+    b.kind !== 'keep' &&
+    BUILDINGS[b.kind].unit &&
+    workersUsed(w) + BUILDINGS[b.kind].workers > workerCap(w)
+  )
+    return 'คนงานไม่พอ สร้างหรืออัปเกรดบ้านคนงาน';
   const lack = missing(w, upgradeCost(b));
   if (lack) return RESOURCES[lack].name + 'ไม่พอ';
   return '';
@@ -554,6 +680,31 @@ export function command(w: World, pid: string, c: Command): string {
     p.picks--;
     return '';
   }
+  if (c.type === 'rally') {
+    const mine = following(w, pid).length;
+    if (mine >= p.stack) return 'กองกำลังเต็มแล้ว';
+    const free = w.units
+      .filter((u) => u.mode === 'hold' && dist(u, p) < 9)
+      .sort((a, b) => dist(a, p) - dist(b, p))
+      .slice(0, p.stack - mine);
+    if (!free.length) return 'ไม่มีทหารว่างใกล้ตัว';
+    for (const u of free) {
+      u.mode = 'follow';
+      u.owner = pid;
+    }
+    return '';
+  }
+  if (c.type === 'release') {
+    const mine = following(w, pid);
+    if (!mine.length) return 'ไม่มีทหารที่ตามอยู่';
+    for (const u of mine) {
+      u.mode = 'hold';
+      u.owner = '';
+      u.px = u.x;
+      u.pz = u.z;
+    }
+    return '';
+  }
   if (w.phase !== 'prep') return 'สร้างและอัปเกรดได้ในช่วงพัก';
   if (c.type === 'build') {
     const k = c.kind;
@@ -576,7 +727,7 @@ export function command(w: World, pid: string, c: Command): string {
       w.terrainVersion++;
       clearFields();
     }
-    w.buildings.push({
+    const built: Building = {
       id: 'b' + ++w.serial,
       kind: k,
       x,
@@ -587,7 +738,9 @@ export function command(w: World, pid: string, c: Command): string {
       angle: 0,
       level: 1,
       branch: '',
-    });
+    };
+    w.buildings.push(built);
+    if (d.unit) spawnSoldier(w, built, 1);
     return '';
   }
   if (c.type === 'upgrade') {
@@ -606,6 +759,7 @@ export function command(w: World, pid: string, c: Command): string {
     b.branch = c.branch!;
     b.maxHp *= b.kind === 'house' ? 1.3 : 1.65;
     b.hp = b.maxHp;
+    if (BUILDINGS[b.kind].unit) spawnSoldier(w, b, b.level);
     return '';
   }
   return '';
@@ -814,6 +968,53 @@ function levelUp(p: Player, xp: number) {
     p.picks++;
   }
 }
+function stepUnits(w: World, dt: number) {
+  for (const u of w.units) {
+    if (u.hp <= 0) continue;
+    const info = UNITS[u.kind];
+    u.cool -= dt;
+    const owner =
+      u.mode === 'follow' ? w.players.find((p) => p.id === u.owner) : null;
+    if (u.mode === 'follow' && (!owner || owner.dead > 0)) {
+      u.mode = 'hold';
+      u.owner = '';
+      u.px = u.x;
+      u.pz = u.z;
+    }
+    const anchor = owner ? owner : { x: u.px, z: u.pz };
+    const leash = owner ? 4 : 3.5;
+    const e = w.enemies
+      .filter(
+        (e) =>
+          e.hp > 0 &&
+          dist(u, e) <= Math.max(info.range, 2.2) + 1.5 &&
+          dist(anchor, e) < leash + info.range + 1,
+      )
+      .sort((a, b) => dist(u, a) - dist(u, b))[0];
+    if (e && dist(u, e) <= info.range) {
+      u.angle = Math.atan2(e.x - u.x, e.z - u.z);
+      if (u.cool <= 0) {
+        u.cool = info.cool;
+        e.hp -= info.damage;
+        emit(w, u, e, u.kind === 'archer' ? 'arrow' : 'hit');
+      }
+      continue;
+    }
+    if (e && dist(anchor, u) < leash) {
+      move(w, u, e.x - u.x, e.z - u.z, info.speed, dt);
+      continue;
+    }
+    if (owner) {
+      const a = (u.slot * 1.9 + w.units.indexOf(u)) % (Math.PI * 2);
+      const tx = owner.x - Math.sin(owner.angle) * 1.4 + Math.cos(a) * 1.1,
+        tz = owner.z - Math.cos(owner.angle) * 1.4 + Math.sin(a) * 1.1;
+      if (dist(u, { x: tx, z: tz }) > 0.8)
+        move(w, u, tx - u.x, tz - u.z, info.speed * 1.2, dt);
+    } else if (dist(u, anchor) > 0.6) {
+      move(w, u, anchor.x - u.x, anchor.z - u.z, info.speed, dt);
+    }
+  }
+}
 export function step(w: World, inputs: Record<string, Input>, dt: number) {
   if (w.phase === 'over') return;
   dt = Math.min(dt, 0.05);
@@ -889,6 +1090,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
       }
     }
   }
+  stepUnits(w, dt);
   if (w.phase === 'prep') {
     w.timer += dt;
     return;
@@ -1002,7 +1204,10 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     e.cool -= dt;
     e.slow -= dt;
     let target: Unit = w.buildings[0];
-    const nearby = w.players.filter((p) => p.dead <= 0 && dist(p, e) < 5);
+    const nearby: Unit[] = [
+      ...w.players.filter((p) => p.dead <= 0 && dist(p, e) < 5),
+      ...w.units.filter((u) => u.hp > 0 && dist(u, e) < 4),
+    ];
     if (nearby.length && e.kind !== 'boss')
       target = nearby.sort((a, b) => dist(a, e) - dist(b, e))[0];
     const nearBuilding = w.buildings
@@ -1044,6 +1249,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     });
   }
   w.enemies = w.enemies.filter((e) => e.hp > 0);
+  w.units = w.units.filter((u) => u.hp > 0);
   if (w.gems.length > 180) {
     w.gems[0].value += w.gems[1].value;
     w.gems.splice(1, 1);
@@ -1073,6 +1279,9 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     clearFields();
   }
   w.buildings = w.buildings.filter((b) => b.hp > 0);
+  const homes = new Set(w.buildings.map((b) => b.id));
+  for (const u of w.units) if (!homes.has(u.home)) u.hp = 0;
+  w.units = w.units.filter((u) => u.hp > 0);
   if (w.buildings.length < before && workersUsed(w) > workerCap(w))
     w.notice = 'บ้านคนงานถูกทำลาย ป้อมทำงานช้าลงจนกว่าจะสร้างบ้านใหม่';
   if (w.left === 0 && w.enemies.length === 0) {
@@ -1085,6 +1294,16 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
       p.dead = 0;
       p.hp = p.maxHp;
     }
+    for (const b of w.buildings) {
+      const info = b.kind === 'keep' ? null : BUILDINGS[b.kind];
+      if (!info?.unit) continue;
+      const have = new Set(
+        w.units.filter((u) => u.home === b.id).map((u) => u.slot),
+      );
+      for (let slot = 1; slot <= b.level; slot++)
+        if (!have.has(slot)) spawnSoldier(w, b, slot);
+    }
+    for (const u of w.units) u.hp = u.maxHp;
     for (const g of w.gems) for (const p of w.players) levelUp(p, g.value);
     w.gems = [];
     w.notice = 'รอดแล้ว! +' + costText(gain) + ' · ซ่อมฐานและเลือกพร';

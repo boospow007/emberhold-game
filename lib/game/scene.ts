@@ -437,6 +437,47 @@ export class GameScene {
       rod.position.set(0.8, 0.9, 0.5);
       rod.rotation.z = -0.5;
       g.add(rod);
+    } else if (kind === 'barracks' || kind === 'archery' || kind === 'stable') {
+      const col =
+        kind === 'barracks'
+          ? 0x8d6b4f
+          : kind === 'archery'
+            ? 0x6f8a63
+            : 0x9a8a6a;
+      const b = this.box(1.9, 0.9, 1.5, col);
+      b.position.y = 0.45;
+      g.add(b);
+      const roof = new T.Mesh(
+        new T.ConeGeometry(1.5, 0.9, 4),
+        this.mat(kind === 'stable' ? 0x7a4a3a : 0x5a4a3a),
+      );
+      roof.rotation.y = Math.PI / 4;
+      roof.position.y = 1.35;
+      g.add(roof);
+      const pole = this.box(0.08, 1.8, 0.08, 0x3f3226);
+      pole.position.set(0.9, 1.2, -0.6);
+      g.add(pole);
+      const flag = this.box(
+        0.5,
+        0.3,
+        0.04,
+        branch === 'grow' && level > 1 ? 0xf2c36d : 0xa45c3d,
+      );
+      flag.position.set(1.15, 1.95, -0.6);
+      g.add(flag);
+      if (kind === 'archery') {
+        const targetRing = new T.Mesh(
+          new T.RingGeometry(0.2, 0.4, 12),
+          new T.MeshBasicMaterial({ color: 0xe8d8b0, side: T.DoubleSide }),
+        );
+        targetRing.position.set(-0.8, 0.7, 0.78);
+        g.add(targetRing);
+      }
+      if (kind === 'stable') {
+        const fence = this.box(1.6, 0.35, 0.08, 0x5d4733);
+        fence.position.set(0, 0.35, 1.0);
+        g.add(fence);
+      }
     } else if (kind === 'ballista') {
       const b = this.box(1.5, 1.2, 1.5, 0x9a9c8a);
       b.position.y = 0.6;
@@ -545,6 +586,55 @@ export class GameScene {
     if (kind === 'boss') g.scale.setScalar(2.5);
     else if (kind === 'brute') g.scale.setScalar(1.45);
     else if (kind === 'runner') g.scale.set(0.75, 0.8, 0.75);
+    return g;
+  }
+  soldier(kind: string, color: number) {
+    const g = new T.Group();
+    const body = this.box(
+      0.42,
+      0.6,
+      0.34,
+      kind === 'knight' ? 0xb7bcc4 : 0x7d8f7a,
+    );
+    body.position.y = 0.62;
+    g.add(body);
+    const head = new T.Mesh(
+      new T.IcosahedronGeometry(0.2, 0),
+      this.mat(0xe8c39c),
+    );
+    head.position.y = 1.12;
+    g.add(head);
+    const helm = this.box(
+      0.44,
+      0.14,
+      0.4,
+      kind === 'knight' ? 0xd2b673 : 0x5a6b66,
+    );
+    helm.position.y = 1.26;
+    g.add(helm);
+    for (const x of [-0.14, 0.14]) {
+      const leg = this.box(0.15, 0.36, 0.2, 0x3b4a45);
+      leg.position.set(x, 0.2, 0);
+      g.add(leg);
+    }
+    const tab = this.box(0.5, 0.08, 0.08, color);
+    tab.position.set(0, 0.95, -0.2);
+    g.add(tab);
+    const weapon = this.box(
+      kind === 'archer' ? 0.08 : 0.1,
+      kind === 'knight' ? 1.1 : 0.8,
+      0.1,
+      kind === 'archer' ? 0x8a6a48 : 0xd8d2c0,
+    );
+    weapon.position.set(0.32, 0.7, 0.15);
+    weapon.rotation.z = -0.3;
+    g.add(weapon);
+    if (kind === 'knight') {
+      const shield = this.box(0.08, 0.5, 0.4, 0xa45c3d);
+      shield.position.set(-0.32, 0.65, 0.05);
+      g.add(shield);
+      g.scale.setScalar(1.15);
+    }
     return g;
   }
   health(g: T.Group, hp: number, max: number, y: number) {
@@ -660,6 +750,29 @@ export class GameScene {
       g.rotation.y = u.angle;
       g.visible = !isPlayer || u.dead <= 0;
       this.health(g, u.hp, u.maxHp, isPlayer ? 2.05 : 1.9);
+    }
+    for (const u of w.units) {
+      live.add(u.id);
+      let g = this.entities.get(u.id);
+      if (!g) {
+        const owner = w.players.find((p) => p.id === u.owner);
+        g = this.soldier(u.kind, owner ? owner.color : 0x9edca2);
+        g.userData.owner = u.owner;
+        g.position.set(u.x, this.y(u.x, u.z), u.z);
+        this.scene.add(g);
+        this.entities.set(u.id, g);
+      }
+      if (g.userData.owner !== u.owner) {
+        const owner = w.players.find((p) => p.id === u.owner);
+        const tab = g.children[5] as T.Mesh;
+        if (tab) tab.material = this.mat(owner ? owner.color : 0x9edca2);
+        g.userData.owner = u.owner;
+      }
+      g.position.x += (u.x - g.position.x) * Math.min(1, dt * 18);
+      g.position.z += (u.z - g.position.z) * Math.min(1, dt * 18);
+      g.position.y = this.y(g.position.x, g.position.z);
+      g.rotation.y = u.angle;
+      this.health(g, u.hp, u.maxHp, 1.6);
     }
     for (const [id, g] of this.entities)
       if (!live.has(id)) {
