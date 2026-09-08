@@ -37,6 +37,16 @@ node --experimental-strip-types --test --test-name-pattern="respawns" tests/engi
 
 `coop.test.mjs` hits `/api/game` at `GAME_TEST_ORIGIN` (default `http://localhost:3000`), creates real anonymous profiles, and cleans up its room. Dev only.
 
+`server/` is a separate Node app (the PvP realtime server, phase 6). It has its own `package.json`/`tsconfig.json` (no DOM types), imports `lib/game/engine.ts` and `terrain.ts` directly, and is excluded from the root tsconfig:
+
+```bash
+cd server && npm install && PVP_SECRET=test-secret npm run dev        # :8787
+PVP_SECRET=test-secret node --experimental-strip-types --test tests/server.test.mjs
+npx tsc -p server/tsconfig.json --noEmit
+```
+
+It deploys to a DigitalOcean droplet through `.github/workflows/deploy-server.yml` (Docker + Caddy); secrets live only in GitHub Secrets and `server/.env`. See `doc/game-doc/07-modes-netcode.md` for the PvP/netcode plan.
+
 Local D1 state lives in `.wrangler/state/v3/d1`. The `drizzle/*.sql` migrations must be applied there before the API works; Sites applies them automatically on deploy. There is no migrations table locally, so apply a new migration directly to the Miniflare SQLite file (`wrangler d1 execute` with `dist/server/wrangler.json` targets a different persist path and will not work):
 
 ```bash

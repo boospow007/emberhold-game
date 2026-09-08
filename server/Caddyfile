@@ -1,0 +1,4 @@
+# Caddy terminates TLS (Let's Encrypt) and proxies HTTP + WebSocket to the game server.
+{$PVP_DOMAIN} {
+  reverse_proxy game:8787
+}
