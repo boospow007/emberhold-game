@@ -2511,6 +2511,14 @@ button:focus-visible {
   }
 }
 
+/* --- screen transitions: home <-> game --- */
+.game-stage {
+  animation: ui-fade 0.6s ease both;
+}
+.app-shell {
+  animation: ui-fade 0.45s ease both;
+}
+
 /* --- home screen --- */
 .title-block h1 {
   animation: ui-rise 0.8s var(--ease-out) both;

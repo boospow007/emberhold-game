@@ -32,6 +32,15 @@ export class GameScene {
   gemGeometry = new T.OctahedronGeometry(0.14);
   terrainMeshes = new Map<number, T.Group>();
   ground: Terrain | null = null;
+  hemi!: T.HemisphereLight;
+  water: T.Mesh | null = null;
+  waterBase: Float32Array | null = null;
+  dying: { g: T.Object3D; at: number; kind: string; base: number }[] = [];
+  night = 0;
+  shakeAt = -9999;
+  lastKeepHp = Infinity;
+  skyDay = new T.Color();
+  skyNight = new T.Color();
   sun: T.DirectionalLight;
   disposed = false;
   constructor(
@@ -54,7 +63,13 @@ export class GameScene {
     const colors = MAPS[map];
     this.scene.background = new T.Color(colors.sky);
     this.scene.fog = new T.Fog(colors.sky, 60, 150);
-    this.scene.add(new T.HemisphereLight(0xffeac4, 0x496579, 2.5));
+    this.hemi = new T.HemisphereLight(0xffeac4, 0x496579, 2.5);
+    this.scene.add(this.hemi);
+    this.skyDay.setHex(colors.sky);
+    this.skyNight
+      .setHex(colors.sky)
+      .multiplyScalar(0.45)
+      .lerp(new T.Color(0x0c1424), 0.4);
     const sun = new T.DirectionalLight(0xffe3ab, 3.5);
     sun.position.set(-16, 30, 12);
     sun.castShadow = true;
@@ -160,7 +175,7 @@ export class GameScene {
     mesh.castShadow = true;
     this.root.add(mesh);
     const water = new T.Mesh(
-      new T.PlaneGeometry(SIZE + 4, SIZE + 4),
+      new T.PlaneGeometry(SIZE + 4, SIZE + 4, 40, 40),
       new T.MeshStandardMaterial({
         color: world.map === 'snow' ? 0x6f9cb8 : 0x3f89a8,
         transparent: true,
@@ -173,6 +188,10 @@ export class GameScene {
     water.position.y = -0.08;
     water.receiveShadow = true;
     this.root.add(water);
+    this.water = water;
+    this.waterBase = new Float32Array(
+      (water.geometry.attributes.position as T.BufferAttribute).array,
+    );
     const rim = this.box(SIZE + 6, 3, SIZE + 6, colors.dark);
     rim.position.y = -2.2;
     this.root.add(rim);
@@ -239,26 +258,30 @@ export class GameScene {
     }
     return g;
   }
-  syncTerrain(w: World) {
+  syncTerrain(w: World, now: number) {
     const live = new Set<number>();
     for (const o of w.terrain) {
       live.add(o.id);
       let g = this.terrainMeshes.get(o.id);
       if (!g) {
         g = this.terrainMesh(o);
+        g.userData.wood = o.wood;
         this.root.add(g);
         this.terrainMeshes.set(o.id, g);
       }
       if (o.kind === 'tree') {
+        if (o.wood < g.userData.wood) g.userData.hitAt = now;
+        g.userData.wood = o.wood;
         const k = 0.6 + 0.4 * Math.min(1, o.wood / 30);
         g.scale.set(k, k, k);
+        const t = (now - (g.userData.hitAt ?? -9999)) / 320;
+        g.rotation.z = t < 1 ? Math.sin(t * Math.PI * 3) * 0.12 * (1 - t) : 0;
       }
     }
     for (const [id, g] of this.terrainMeshes)
       if (!live.has(id)) {
-        this.root.remove(g);
-        this.disposeGeometry(g);
         this.terrainMeshes.delete(id);
+        this.dying.push({ g, at: now, kind: 'tree', base: g.scale.x });
       }
   }
   building(kind: string, branch = '', level = 1) {
@@ -288,9 +311,11 @@ export class GameScene {
         new T.MeshBasicMaterial({ color: 0xffc46a }),
       );
       flame.position.y = 4.6;
+      flame.name = 'flame';
       g.add(flame);
       const light = new T.PointLight(0xffc46a, 12, 12);
       light.position.y = 4;
+      light.name = 'flame-light';
       g.add(light);
     } else if (kind === 'wall') {
       const b = this.box(
@@ -552,23 +577,28 @@ export class GameScene {
   character(color: number, enemy = false, kind = 'bow') {
     const g = new T.Group();
     const body = this.box(enemy ? 0.7 : 0.52, enemy ? 0.65 : 0.75, 0.42, color);
+    body.material = this.mat(color).clone();
     body.position.y = 0.75;
+    body.name = 'body';
     g.add(body);
     const head = new T.Mesh(
       new T.IcosahedronGeometry(enemy ? 0.3 : 0.26, 0),
       this.mat(enemy ? 0x4d2736 : 0xe8c39c),
     );
     head.position.y = 1.4;
+    head.name = 'head';
     g.add(head);
-    for (const x of [-0.18, 0.18]) {
+    for (const [i, x] of [-0.18, 0.18].entries()) {
       const leg = this.box(0.18, 0.45, 0.23, enemy ? 0x402b3a : 0x233b39);
       leg.position.set(x, 0.25, 0);
+      leg.name = i === 0 ? 'legL' : 'legR';
       g.add(leg);
     }
     if (!enemy) {
       const cape = this.box(0.56, 0.75, 0.07, color);
       cape.position.set(0, 0.85, -0.25);
       cape.rotation.x = -0.2;
+      cape.name = 'cape';
       g.add(cape);
       const helmet = this.box(0.56, 0.18, 0.48, 0xd2b673);
       helmet.position.y = 1.58;
@@ -581,11 +611,26 @@ export class GameScene {
       );
       weapon.position.set(0.42, 0.8, 0.2);
       weapon.rotation.z = -0.25;
+      weapon.name = 'weapon';
       g.add(weapon);
+    } else {
+      for (const x of [-0.42, 0.42]) {
+        const arm = this.box(0.16, 0.5, 0.16, color);
+        arm.position.set(x, 0.85, 0.05);
+        arm.name = x < 0 ? 'armL' : 'armR';
+        g.add(arm);
+      }
     }
-    if (kind === 'boss') g.scale.setScalar(2.5);
-    else if (kind === 'brute') g.scale.setScalar(1.45);
-    else if (kind === 'runner') g.scale.set(0.75, 0.8, 0.75);
+    const base =
+      kind === 'boss'
+        ? 2.5
+        : kind === 'brute'
+          ? 1.45
+          : kind === 'runner'
+            ? 0.78
+            : 1;
+    g.scale.setScalar(base);
+    g.userData.baseScale = base;
     return g;
   }
   soldier(kind: string, color: number) {
@@ -596,13 +641,16 @@ export class GameScene {
       0.34,
       kind === 'knight' ? 0xb7bcc4 : 0x7d8f7a,
     );
+    body.material = (body.material as T.MeshStandardMaterial).clone();
     body.position.y = 0.62;
+    body.name = 'body';
     g.add(body);
     const head = new T.Mesh(
       new T.IcosahedronGeometry(0.2, 0),
       this.mat(0xe8c39c),
     );
     head.position.y = 1.12;
+    head.name = 'head';
     g.add(head);
     const helm = this.box(
       0.44,
@@ -612,13 +660,15 @@ export class GameScene {
     );
     helm.position.y = 1.26;
     g.add(helm);
-    for (const x of [-0.14, 0.14]) {
+    for (const [i, x] of [-0.14, 0.14].entries()) {
       const leg = this.box(0.15, 0.36, 0.2, 0x3b4a45);
       leg.position.set(x, 0.2, 0);
+      leg.name = i === 0 ? 'legL' : 'legR';
       g.add(leg);
     }
     const tab = this.box(0.5, 0.08, 0.08, color);
     tab.position.set(0, 0.95, -0.2);
+    tab.name = 'tab';
     g.add(tab);
     const weapon = this.box(
       kind === 'archer' ? 0.08 : 0.1,
@@ -628,13 +678,16 @@ export class GameScene {
     );
     weapon.position.set(0.32, 0.7, 0.15);
     weapon.rotation.z = -0.3;
+    weapon.name = 'weapon';
     g.add(weapon);
     if (kind === 'knight') {
       const shield = this.box(0.08, 0.5, 0.4, 0xa45c3d);
       shield.position.set(-0.32, 0.65, 0.05);
       g.add(shield);
-      g.scale.setScalar(1.15);
     }
+    const base = kind === 'knight' ? 1.15 : 1;
+    g.scale.setScalar(base);
+    g.userData.baseScale = base;
     return g;
   }
   health(g: T.Group, hp: number, max: number, y: number) {
@@ -656,6 +709,117 @@ export class GameScene {
     fill.scale.x = v;
     fill.position.x = -(1 - v) * 0.605;
   }
+  // Per-frame character motion: walk cycle, attack swing, hit flash, spawn pop.
+  animateUnit(
+    g: T.Group,
+    u: { x: number; z: number; hp: number; cool: number; angle: number },
+    now: number,
+    dt: number,
+  ) {
+    const d = g.userData;
+    if (d.born === undefined) {
+      d.born = now;
+      d.tx = u.x;
+      d.tz = u.z;
+      d.lastCool = u.cool;
+      d.lastHp = u.hp;
+      d.phase = Math.random() * 6;
+    }
+    const moved = Math.hypot(u.x - d.tx, u.z - d.tz);
+    d.tx = u.x;
+    d.tz = u.z;
+    const speed = dt > 0 ? moved / dt : 0;
+    const walk = Math.min(1, speed / 3.5);
+    d.walk = (d.walk ?? 0) + (walk - (d.walk ?? 0)) * Math.min(1, dt * 12);
+    d.phase += dt * (4 + speed * 2.2);
+    if (u.cool > d.lastCool + 0.05) d.attackAt = now;
+    d.lastCool = u.cool;
+    if (u.hp < d.lastHp - 0.01) d.hitAt = now;
+    d.lastHp = u.hp;
+    const swing = Math.sin(d.phase) * 0.75 * d.walk;
+    const legL = g.getObjectByName('legL'),
+      legR = g.getObjectByName('legR');
+    if (legL) legL.rotation.x = swing;
+    if (legR) legR.rotation.x = -swing;
+    const armL = g.getObjectByName('armL'),
+      armR = g.getObjectByName('armR');
+    if (armL) armL.rotation.x = -swing * 0.8;
+    if (armR) armR.rotation.x = swing * 0.8;
+    const body = g.getObjectByName('body') as T.Mesh | undefined;
+    const head = g.getObjectByName('head');
+    const cape = g.getObjectByName('cape');
+    const bob = Math.abs(Math.sin(d.phase)) * 0.07 * d.walk;
+    const breathe = Math.sin(now * 0.003 + d.phase) * 0.012;
+    const at = (now - (d.attackAt ?? -9999)) / 200;
+    const lunge = at < 1 ? Math.sin(at * Math.PI) : 0;
+    if (body) {
+      body.position.y =
+        (d.bodyY ?? (d.bodyY = body.position.y)) + bob + breathe;
+      body.position.z = lunge * 0.18;
+      body.rotation.x = lunge * 0.25 - d.walk * 0.08;
+      const hit = (now - (d.hitAt ?? -9999)) / 260;
+      const m = body.material as T.MeshStandardMaterial;
+      if (hit < 1)
+        m.emissive.setRGB(0.9 * (1 - hit), 0.25 * (1 - hit), 0.2 * (1 - hit));
+      else if (m.emissive.r > 0) m.emissive.setRGB(0, 0, 0);
+    }
+    if (head) {
+      head.position.y =
+        (d.headY ?? (d.headY = head.position.y)) + bob * 1.1 + breathe;
+      head.position.z = lunge * 0.22;
+    }
+    if (cape) cape.rotation.x = -0.2 - d.walk * 0.5 - lunge * 0.3;
+    const weapon = g.getObjectByName('weapon');
+    if (weapon) {
+      const rest = d.weaponZ ?? (d.weaponZ = weapon.rotation.z);
+      weapon.rotation.z = rest - lunge * 1.1;
+      weapon.rotation.x = -lunge * 0.6;
+    }
+    const born = Math.min(1, (now - d.born) / 260);
+    const pop = born < 1 ? 1 + Math.sin(born * Math.PI) * 0.18 : 1;
+    const hitScale = (now - (d.hitAt ?? -9999)) / 200;
+    const flinch = hitScale < 1 ? 1 + Math.sin(hitScale * Math.PI) * 0.1 : 1;
+    const base = d.baseScale ?? 1;
+    g.scale.setScalar(base * (0.2 + 0.8 * born) * pop * flinch);
+  }
+  animateDying(now: number) {
+    for (const item of this.dying.slice()) {
+      const dur =
+        item.kind === 'building'
+          ? 650
+          : item.kind === 'tree'
+            ? 700
+            : item.kind === 'gem'
+              ? 320
+              : 380;
+      const t = Math.min(1, (now - item.at) / dur);
+      const g = item.g;
+      if (item.kind === 'building') {
+        g.scale.setScalar(item.base * (1 - t * 0.85));
+        g.position.y -= t * 0.05;
+        g.rotation.z = t * 0.35;
+        g.rotation.x = t * 0.2;
+      } else if (item.kind === 'tree') {
+        g.rotation.x = Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.5) * 1.45;
+        g.scale.setScalar(item.base * (1 - Math.max(0, t - 0.7) / 0.3));
+      } else if (item.kind === 'gem') {
+        g.scale.setScalar(item.base * (1 + t * 2.2));
+        g.position.y += 0.04;
+        const m = (g as T.Mesh).material as T.MeshStandardMaterial;
+        m.transparent = true;
+        m.opacity = 1 - t;
+      } else {
+        g.scale.setScalar(item.base * (1 - t));
+        g.rotation.x = t * 1.2;
+        g.position.y -= t * 0.03;
+      }
+      if (t >= 1) {
+        g.parent?.remove(g);
+        this.disposeGeometry(g, item.kind === 'gem');
+        this.dying.splice(this.dying.indexOf(item), 1);
+      }
+    }
+  }
   render(
     w: World,
     localId: string,
@@ -665,6 +829,14 @@ export class GameScene {
     const now = performance.now(),
       dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // Day / night: battles darken the sky and let the keep's flame carry the light.
+    const target = w.phase === 'battle' ? 1 : 0;
+    this.night += (target - this.night) * Math.min(1, dt * 1.4);
+    this.sun.intensity = 3.5 - 2.1 * this.night;
+    this.hemi.intensity = 2.5 - 1.2 * this.night;
+    const sky = this.skyDay.clone().lerp(this.skyNight, this.night);
+    (this.scene.background as T.Color).copy(sky);
+    (this.scene.fog as T.Fog).color.copy(sky);
     const p = w.players.find((p) => p.id === localId) || w.players[0];
     if (p)
       this.follow.lerp(
@@ -678,15 +850,36 @@ export class GameScene {
     this.sun.position.set(this.follow.x - 16, 30, this.follow.z + 12);
     this.sun.target.position.set(this.follow.x, 0, this.follow.z);
     this.sun.target.updateMatrixWorld();
+    const keep = w.buildings[0];
+    if (keep && keep.hp < this.lastKeepHp - 0.01) this.shakeAt = now;
+    this.lastKeepHp = keep ? keep.hp : Infinity;
+    const shakeT = (now - this.shakeAt) / 320;
+    const shake = shakeT < 1 ? (1 - shakeT) * 0.35 : 0;
+    const sx = Math.sin(now * 0.09) * shake,
+      sz = Math.cos(now * 0.11) * shake;
     const mobile = this.width / this.height < 0.8;
     const py = p ? this.y(p.x, p.z) : 0;
     this.camera.position.set(
-      this.follow.x,
+      this.follow.x + sx,
       py + (mobile ? 28 : 31),
-      this.follow.z + (mobile ? 23 : 25),
+      this.follow.z + (mobile ? 23 : 25) + sz,
     );
-    this.camera.lookAt(this.follow.x, py, this.follow.z - 2);
-    this.syncTerrain(w);
+    this.camera.lookAt(this.follow.x + sx, py, this.follow.z - 2 + sz);
+    this.syncTerrain(w, now);
+    if (this.water && this.waterBase) {
+      const pos = this.water.geometry.attributes.position as T.BufferAttribute;
+      const t = now * 0.0012;
+      for (let i = 0; i < pos.count; i++) {
+        const x = this.waterBase[i * 3],
+          yb = this.waterBase[i * 3 + 1];
+        pos.setZ(
+          i,
+          Math.sin(x * 0.35 + t) * 0.05 + Math.cos(yb * 0.28 + t * 0.8) * 0.05,
+        );
+      }
+      pos.needsUpdate = true;
+      this.water.geometry.computeVertexNormals();
+    }
     const live = new Set<string>();
     for (const b of w.buildings) {
       live.add(b.id);
@@ -701,13 +894,40 @@ export class GameScene {
       if (!g) {
         g = this.building(b.kind, b.branch, b.level);
         g.userData.key = key;
+        g.userData.born = now;
+        g.userData.lastHp = b.hp;
         g.position.set(b.x, b.kind === 'bridge' ? -0.3 : this.y(b.x, b.z), b.z);
         this.scene.add(g);
         this.entities.set(b.id, g);
       }
+      const d = g.userData;
+      if (b.hp < d.lastHp - 0.01) d.hitAt = now;
+      d.lastHp = b.hp;
       const fan = g.getObjectByName('fan');
       if (fan) fan.rotation.z += dt;
-      if (b.kind === 'keep') g.scale.setScalar(1 + (b.level - 1) * 0.08);
+      const flame = g.getObjectByName('flame');
+      if (flame) {
+        const f =
+          1 + Math.sin(now * 0.021) * 0.12 + Math.sin(now * 0.037 + 1) * 0.08;
+        flame.scale.set(f, 1.2 + (f - 1) * 1.5, f);
+        flame.rotation.y = now * 0.002;
+        const light = g.getObjectByName('flame-light') as
+          | T.PointLight
+          | undefined;
+        if (light)
+          light.intensity =
+            (12 + Math.sin(now * 0.017) * 2.5) * (1 + this.night * 0.9);
+      }
+      const born = Math.min(1, (now - d.born) / 420);
+      const pop =
+        born < 1 ? 1 - Math.cos(born * Math.PI * 0.5) * (1 - born) : 1;
+      const overshoot = born < 1 ? 1 + Math.sin(born * Math.PI) * 0.12 : 1;
+      const hit = (now - (d.hitAt ?? -9999)) / 300;
+      const wobble =
+        hit < 1 ? Math.sin(hit * Math.PI * 3) * 0.06 * (1 - hit) : 0;
+      const base = b.kind === 'keep' ? 1 + (b.level - 1) * 0.08 : 1;
+      g.scale.setScalar(base * pop * overshoot);
+      g.rotation.z = wobble;
       this.health(g, b.hp, b.maxHp, b.kind === 'keep' ? 5.3 : 3.3);
     }
     for (const u of [...w.players, ...w.enemies]) {
@@ -726,7 +946,7 @@ export class GameScene {
           !isPlayer,
           isPlayer ? u.weapon : u.kind,
         );
-        g.position.set(u.x, 0, u.z);
+        g.position.set(u.x, this.y(u.x, u.z), u.z);
         this.scene.add(g);
         this.entities.set(u.id, g);
         if (u.id === localId) {
@@ -741,6 +961,7 @@ export class GameScene {
           );
           ring.rotation.x = -Math.PI / 2;
           ring.position.y = 0.04;
+          ring.name = 'ring';
           g.add(ring);
         }
       }
@@ -749,6 +970,12 @@ export class GameScene {
       g.position.y = this.y(g.position.x, g.position.z);
       g.rotation.y = u.angle;
       g.visible = !isPlayer || u.dead <= 0;
+      this.animateUnit(g, u, now, dt);
+      const ring = g.getObjectByName('ring');
+      if (ring) {
+        const k = 1 + Math.sin(now * 0.005) * 0.07;
+        ring.scale.set(k, k, 1);
+      }
       this.health(g, u.hp, u.maxHp, isPlayer ? 2.05 : 1.9);
     }
     for (const u of w.units) {
@@ -764,7 +991,7 @@ export class GameScene {
       }
       if (g.userData.owner !== u.owner) {
         const owner = w.players.find((p) => p.id === u.owner);
-        const tab = g.children[5] as T.Mesh;
+        const tab = g.getObjectByName('tab') as T.Mesh | undefined;
         if (tab) tab.material = this.mat(owner ? owner.color : 0x9edca2);
         g.userData.owner = u.owner;
       }
@@ -772,14 +999,24 @@ export class GameScene {
       g.position.z += (u.z - g.position.z) * Math.min(1, dt * 18);
       g.position.y = this.y(g.position.x, g.position.z);
       g.rotation.y = u.angle;
+      this.animateUnit(g, u, now, dt);
       this.health(g, u.hp, u.maxHp, 1.6);
     }
     for (const [id, g] of this.entities)
       if (!live.has(id)) {
-        this.scene.remove(g);
-        this.disposeGeometry(g);
         this.entities.delete(id);
+        const isBuilding =
+          !!g.getObjectByName('health') && !g.getObjectByName('body');
+        const bar = g.getObjectByName('health');
+        if (bar) bar.visible = false;
+        this.dying.push({
+          g,
+          at: now,
+          kind: isBuilding ? 'building' : 'unit',
+          base: g.scale.x,
+        });
       }
+    this.animateDying(now);
     this.clearDynamic(this.effects);
     for (const e of w.effects) {
       const color =
@@ -792,32 +1029,71 @@ export class GameScene {
               : e.kind === 'bolt'
                 ? 0xffffff
                 : 0xffdc8c;
-      const points = [
-        new T.Vector3(e.x, this.y(e.x, e.z) + 1, e.z),
-        new T.Vector3(e.tx, this.y(e.tx, e.tz) + 1, e.tz),
-      ];
-      const geo = new T.BufferGeometry().setFromPoints(points);
-      const line = new T.Line(
-        geo,
-        new T.LineBasicMaterial({
-          color,
-          transparent: true,
-          opacity: Math.max(0.1, e.life * 4),
-        }),
-      );
-      this.effects.add(line);
-      if (e.kind === 'sword' || e.kind === 'staff') {
+      const from = new T.Vector3(e.x, this.y(e.x, e.z) + 1, e.z),
+        to = new T.Vector3(e.tx, this.y(e.tx, e.tz) + 1, e.tz);
+      const t = 1 - Math.max(0, Math.min(1, e.life / 0.25));
+      if (e.kind === 'arrow' || e.kind === 'bolt' || e.kind === 'staff') {
+        // Projectile flies from shooter to target over the effect's lifetime.
+        const pos = from.clone().lerp(to, Math.min(1, t * 1.3));
+        pos.y += Math.sin(Math.min(1, t * 1.3) * Math.PI) * 0.6;
+        const bolt = new T.Mesh(
+          e.kind === 'staff'
+            ? new T.OctahedronGeometry(0.22)
+            : new T.BoxGeometry(0.08, 0.08, e.kind === 'bolt' ? 0.9 : 0.6),
+          new T.MeshBasicMaterial({ color }),
+        );
+        bolt.position.copy(pos);
+        bolt.lookAt(to);
+        if (e.kind === 'staff') bolt.rotation.y = now * 0.01;
+        this.effects.add(bolt);
+        const trail = new T.Line(
+          new T.BufferGeometry().setFromPoints([
+            from.clone().lerp(to, Math.max(0, t * 1.3 - 0.35)),
+            pos,
+          ]),
+          new T.LineBasicMaterial({ color, transparent: true, opacity: 0.5 }),
+        );
+        this.effects.add(trail);
+      } else {
+        const line = new T.Line(
+          new T.BufferGeometry().setFromPoints([from, to]),
+          new T.LineBasicMaterial({
+            color,
+            transparent: true,
+            opacity: Math.max(0.1, e.life * 4),
+          }),
+        );
+        this.effects.add(line);
+      }
+      if (e.kind === 'chop') {
+        for (let i = 0; i < 3; i++) {
+          const chip = new T.Mesh(
+            new T.BoxGeometry(0.1, 0.06, 0.12),
+            new T.MeshBasicMaterial({ color: 0xd8b487 }),
+          );
+          const a = i * 2.1 + e.tx;
+          chip.position.set(
+            e.tx + Math.cos(a) * t * 0.9,
+            this.y(e.tx, e.tz) + 0.9 + Math.sin(t * Math.PI) * 0.7 - t * 0.4,
+            e.tz + Math.sin(a) * t * 0.9,
+          );
+          chip.rotation.set(t * 4, a, t * 3);
+          this.effects.add(chip);
+        }
+      }
+      if (e.kind === 'sword' || e.kind === 'staff' || e.kind === 'hit') {
+        const big = e.kind === 'sword';
         const ring = new T.Mesh(
           new T.RingGeometry(
-            e.kind === 'sword' ? 1.6 : 1.3,
-            e.kind === 'sword' ? 1.8 : 1.5,
+            (big ? 1.2 : 0.5) + t * (big ? 0.7 : 0.6),
+            (big ? 1.4 : 0.6) + t * (big ? 0.7 : 0.6),
             20,
           ),
           new T.MeshBasicMaterial({
             color,
             side: T.DoubleSide,
             transparent: true,
-            opacity: e.life * 3,
+            opacity: Math.max(0, e.life * 3),
           }),
         );
         ring.rotation.x = -Math.PI / 2;
@@ -830,22 +1106,26 @@ export class GameScene {
     const gemIds = new Set(w.gems.map((g) => g.id));
     for (const [gid, mesh] of this.gemMeshes)
       if (!gemIds.has(gid)) {
-        this.gemGroup.remove(mesh);
         this.gemMeshes.delete(gid);
+        mesh.material = (mesh.material as T.Material).clone();
+        this.dying.push({ g: mesh, at: now, kind: 'gem', base: 1 });
       }
     for (const gem of w.gems) {
       let m = this.gemMeshes.get(gem.id);
       if (!m) {
         m = new T.Mesh(this.gemGeometry, this.mat(0x92e5d6));
+        m.userData.born = now;
         this.gemMeshes.set(gem.id, m);
         this.gemGroup.add(m);
       }
+      const born = Math.min(1, (now - m.userData.born) / 300);
+      m.scale.setScalar(0.3 + 0.7 * born + Math.sin(born * Math.PI) * 0.3);
       m.position.set(
         gem.x,
         this.y(gem.x, gem.z) + 0.3 + Math.sin(now * 0.003 + gem.id) * 0.08,
         gem.z,
       );
-      m.rotation.y = now * 0.001;
+      m.rotation.y = now * 0.001 + gem.id;
     }
     if (placement) {
       if (!this.ghost || this.ghostKind !== placement.kind) {
@@ -874,10 +1154,18 @@ export class GameScene {
       }
       this.ghost.position.set(
         placement.x,
-        this.y(placement.x, placement.z),
+        this.y(placement.x, placement.z) + Math.sin(now * 0.004) * 0.08 + 0.08,
         placement.z,
       );
       const valid = canBuild(w, placement.kind, placement.x, placement.z);
+      const ring = this.ghost.getObjectByName('placement-ring');
+      if (ring) {
+        const k = 1 + Math.sin(now * 0.006) * 0.08;
+        ring.scale.set(k, k, 1);
+        ((ring as T.Mesh).material as T.MeshBasicMaterial).color.setHex(
+          valid ? 0x8ee3b7 : 0xf26d6d,
+        );
+      }
       this.ghost.traverse((o) => {
         if (o instanceof T.Mesh && o.material instanceof T.MeshStandardMaterial)
           o.material.emissive.setHex(valid ? 0x143320 : 0x661a22);
@@ -940,6 +1228,7 @@ export class GameScene {
     this.gemGeometry.dispose();
     this.gemMeshes.clear();
     this.terrainMeshes.clear();
+    this.dying = [];
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
