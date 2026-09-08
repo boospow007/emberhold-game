@@ -161,6 +161,19 @@ test('water and mountains block movement, bridges open water for everyone', () =
   const keep = w.buildings[0];
   keep.level = 4;
   w.res.wood = 500;
+  // Placement chains from the nearest building: give the far shore a link.
+  w.buildings.push({
+    id: 'link',
+    kind: 'wall',
+    x: water.x - 1,
+    z: water.z + 2,
+    hp: 300,
+    maxHp: 300,
+    cool: 0,
+    angle: 0,
+    level: 1,
+    branch: '',
+  });
   assert.equal(
     command(w, 'p1', {
       seq: 1,
@@ -211,6 +224,18 @@ test('fisher huts need a shore and towers on hills gain range', () => {
       )
         shore = { x, z };
   assert.ok(shore);
+  w.buildings.push({
+    id: 'link',
+    kind: 'wall',
+    x: shore.x - 3,
+    z: shore.z,
+    hp: 300,
+    maxHp: 300,
+    cool: 0,
+    angle: 0,
+    level: 1,
+    branch: '',
+  });
   assert.equal(
     command(w, 'p1', { seq: 2, type: 'build', kind: 'fisher', ...shore }),
     '',

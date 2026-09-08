@@ -256,7 +256,7 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     name: 'โรงเลื่อย',
     cost: { wood: 20, gold: 20 },
     hp: 120,
-    desc: 'ตัดไม้เองจากต้นไม้ในรัศมี +4 ต่อต้น (สูงสุด 3)',
+    desc: 'ตัดต้นไม้ในรัศมี 6 ให้เอง +5 ไม้ทุก 5 วินาทีต่อระดับ จนต้นไม้หมด',
     tab: 'economy',
     tier: 1,
     workers: 0,
@@ -277,7 +277,7 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     hp: 160,
     desc: 'สร้างบนหิน • +12 หินต่อระดับเมื่อจบวัน',
     tab: 'economy',
-    tier: 2,
+    tier: 1,
     workers: 1,
     node: 'rock',
   },
@@ -287,7 +287,7 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     hp: 180,
     desc: 'สร้างบนสายแร่ • +8 เหล็กต่อระดับเมื่อจบวัน',
     tab: 'economy',
-    tier: 3,
+    tier: 2,
     workers: 2,
     node: 'ore',
   },
@@ -408,7 +408,9 @@ export const KEEP_UPGRADES: Cost[] = [
   { stone: 60, iron: 30 },
   { iron: 60, gold: 200 },
 ];
-export const KEEP_RADIUS = [0, 12, 20, 30, 44];
+// New buildings must sit within this distance of any existing building
+// (the keep counts a little further). Grows with the keep level.
+export const LINK_RADIUS = [0, 8, 10, 12, 14];
 export const HOUSE_WORKERS = [0, 2, 5, 10];
 export const KEEP_WORKERS = [0, 3, 5, 7, 9];
 export const START_RES: Record<Resource, number> = {
@@ -424,8 +426,10 @@ export const dist = (
   b: { x: number; z: number },
 ) => Math.hypot(a.x - b.x, a.z - b.z);
 export const terrain = (w: World) => terrainOf(w.seed, w.map);
+export const baseExtent = (w: World) =>
+  w.buildings.reduce((m, b) => Math.max(m, Math.hypot(b.x, b.z)), 0);
 export const spawnRadius = (w: World) =>
-  Math.min(HALF - 2, buildRadius(w) + 16);
+  Math.min(HALF - 2, Math.max(24, baseExtent(w) + 16));
 export function bridgeAt(w: World, x: number, z: number) {
   return w.buildings.some(
     (b) => b.kind === 'bridge' && b.hp > 0 && dist(b, { x, z }) < 1.05,
@@ -435,8 +439,14 @@ export function passable(w: World, x: number, z: number) {
   return terrain(w).land(x, z) || bridgeAt(w, x, z);
 }
 export const keepOf = (w: World) => w.buildings[0];
-export const buildRadius = (w: World) =>
-  KEEP_RADIUS[Math.min(KEEP_MAX, keepOf(w).level)];
+export const linkRadius = (w: World) =>
+  LINK_RADIUS[Math.min(KEEP_MAX, keepOf(w).level)];
+export function linked(w: World, x: number, z: number) {
+  const r = linkRadius(w);
+  return w.buildings.some(
+    (b) => b.hp > 0 && dist(b, { x, z }) <= r + (b.kind === 'keep' ? 2 : 0),
+  );
+}
 export function workerCap(w: World) {
   return w.buildings.reduce(
     (s, b) =>
@@ -615,7 +625,7 @@ export function canBuild(w: World, kind: BuildKind, x: number, z: number) {
     Math.abs(z) > HALF - 1
   )
     return false;
-  if (Math.hypot(x, z) > buildRadius(w)) return false;
+  if (!linked(w, x, z)) return false;
   const node = nodeAt(w, kind, x, z);
   if (BUILDINGS[kind].node && !node) return false;
   if (waterError(w, kind, x, z)) return false;
@@ -663,7 +673,7 @@ export function buildError(
   const d = BUILDINGS[kind];
   const gate = buildGate(w, p, kind);
   if (gate) return gate;
-  if (Math.hypot(x, z) > buildRadius(w)) return 'ไกลจากฐานแม่เกินไป';
+  if (!linked(w, x, z)) return `ต้องอยู่ห่างสิ่งก่อสร้างเดิมไม่เกิน ${linkRadius(w)} ช่อง`;
   const water = waterError(w, kind, x, z);
   if (water) return water;
   if (d.node && !nodeAt(w, kind, x, z))
@@ -786,7 +796,7 @@ export function command(w: World, pid: string, c: Command): string {
     if (b.kind === 'keep') {
       b.maxHp += 500;
       b.hp = b.maxHp;
-      w.notice = `ฐานแม่ระดับ ${b.level} · สร้างได้ไกลขึ้นและปลดล็อกสิ่งก่อสร้างใหม่`;
+      w.notice = `ฐานแม่ระดับ ${b.level} · ระยะเชื่อมสิ่งก่อสร้าง ${LINK_RADIUS[b.level]} และปลดล็อกสิ่งก่อสร้างใหม่`;
       return '';
     }
     b.branch = c.branch!;
@@ -822,12 +832,6 @@ export function income(w: World): Cost {
     else if (b.kind === 'goldmine') out.gold = (out.gold || 0) + 20 * b.level;
     else if (b.kind === 'quarry') out.stone = (out.stone || 0) + 12 * b.level;
     else if (b.kind === 'mine') out.iron = (out.iron || 0) + 8 * b.level;
-    else if (b.kind === 'sawmill') {
-      const trees = w.terrain.filter(
-        (o) => o.kind === 'tree' && dist(o, b) < 6,
-      ).length;
-      out.wood = (out.wood || 0) + Math.min(3, trees) * 4 * b.level;
-    }
   }
   return out;
 }
@@ -1009,6 +1013,34 @@ function levelUp(p: Player, xp: number) {
     p.picks++;
   }
 }
+export const SAWMILL_PERIOD = 5;
+export const SAWMILL_YIELD = 5;
+// Sawmills fell the nearest tree in range on a fixed cadence until the
+// forest around them is gone, so waiting in prep never gives infinite wood.
+function stepSawmills(w: World, dt: number) {
+  for (const b of w.buildings) {
+    if (b.kind !== 'sawmill') continue;
+    b.cool -= dt;
+    if (b.cool > 0) continue;
+    const tree = w.terrain
+      .filter((o) => o.kind === 'tree' && o.wood > 0 && dist(o, b) < 6)
+      .sort((a, c) => dist(a, b) - dist(c, b))[0];
+    if (!tree) {
+      b.cool = 1;
+      continue;
+    }
+    b.cool = SAWMILL_PERIOD;
+    const got = Math.min(SAWMILL_YIELD * b.level, tree.wood);
+    tree.wood -= got;
+    w.res.wood += got;
+    emit(w, b, tree, 'chop');
+    if (tree.wood <= 0) {
+      w.terrain = w.terrain.filter((o) => o !== tree);
+      w.terrainVersion++;
+      clearFields();
+    }
+  }
+}
 function stepUnits(w: World, dt: number) {
   for (const u of w.units) {
     if (u.hp <= 0) continue;
@@ -1132,6 +1164,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     }
   }
   stepUnits(w, dt);
+  stepSawmills(w, dt);
   if (w.phase === 'prep') {
     w.timer += dt;
     return;

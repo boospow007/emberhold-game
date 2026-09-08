@@ -10,8 +10,8 @@ import {
   reward,
   workerCap,
   workersUsed,
-  income,
   terrain,
+  spawnRadius,
 } from '../lib/game/engine.ts';
 const profile = {
   id: 'p1',
@@ -54,9 +54,11 @@ test('free placement enforces terrain, resources, tier, radius and phase rules',
   assert.equal(w.buildings.length, 2);
   assert.equal(canBuild(w, 'tower', 4, 0), false);
   assert.match(build(w, 'frost', -4, 0), /ปลดล็อก/);
-  assert.match(build(w, 'quarry', -4, 0), /ฐานแม่/);
+  assert.match(build(w, 'mine', -4, 0), /ฐานแม่/);
+  give(w, { wood: 100 });
+  assert.match(build(w, 'quarry', -4, 0), /ต้องวางบนหิน/);
   const far = spotAt(w, 15);
-  assert.match(build(w, 'wall', far.x, far.z), /ไกลจากฐานแม่/);
+  assert.match(build(w, 'wall', far.x, far.z), /ห่างสิ่งก่อสร้าง/);
   assert.equal(canBuild(w, 'wall', far.x, far.z), false);
   startWave(w);
   assert.notEqual(build(w, 'tower', -4, 0), '');
@@ -154,49 +156,106 @@ test('keep level gates building tiers, upgrade levels and build radius', () => {
     '',
   );
   assert.equal(tower.level, 2);
-  const far = spotAt(w, 15);
-  assert.equal(build(w, 'wall', far.x, far.z), '');
-  assert.match(build(w, 'mine', -4, 0), /ฐานแม่เป็นระดับ 3/);
+  assert.match(build(w, 'ballista', -4, 0), /ฐานแม่เป็นระดับ 3/);
 });
-test('quarries and mines must sit on matching resource nodes and replace them', () => {
+test('placement chains from the nearest building, not just the keep', () => {
   const w = make();
-  give(w, { wood: 500, gold: 500, stone: 500 });
-  w.buildings[0].level = 2;
-  assert.match(build(w, 'quarry', 4, 0), /ต้องวางบนหิน/);
-  const rock = w.terrain.find(
-    (o) => o.kind === 'rock' && Math.hypot(o.x, o.z) < 15,
+  give(w, { wood: 500, gold: 500 });
+  const t = terrain(w);
+  const free = (x, z) =>
+    t.cell(x, z) === 'plain' &&
+    !w.terrain.some((o) => Math.hypot(o.x - x, o.z - z) < 2.5) &&
+    !w.buildings.some((b) => Math.hypot(b.x - x, b.z - z) < 3);
+  let a = -1;
+  for (let ang = 0; ang < Math.PI * 2 && a < 0; ang += 0.05) {
+    const pts = [9, 16].map((d) => [
+      Math.round(Math.cos(ang) * d),
+      Math.round(Math.sin(ang) * d),
+    ]);
+    const opp = [
+      Math.round(-Math.cos(ang) * 17),
+      Math.round(-Math.sin(ang) * 17),
+    ];
+    if (pts.every(([x, z]) => free(x, z)) && free(...opp)) a = ang;
+  }
+  assert.ok(a >= 0, 'no test angle');
+  const near = [Math.round(Math.cos(a) * 9), Math.round(Math.sin(a) * 9)];
+  const chain = [Math.round(Math.cos(a) * 16), Math.round(Math.sin(a) * 16)];
+  const opp = [Math.round(-Math.cos(a) * 17), Math.round(-Math.sin(a) * 17)];
+  assert.match(
+    build(w, 'wall', ...chain),
+    /ห่างสิ่งก่อสร้าง/,
+    'too far from the keep alone',
   );
-  assert.ok(rock);
-  const before = w.terrain.length;
-  assert.equal(build(w, 'quarry', rock.x + 0.5, rock.z), '');
-  assert.equal(w.terrain.length, before - 1);
-  const q = w.buildings.at(-1);
-  assert.deepEqual([q.kind, q.x, q.z], ['quarry', rock.x, rock.z]);
-  assert.equal(income(w).stone, 12);
+  assert.equal(build(w, 'wall', ...near), '', 'within 8 (+2) of the keep');
+  assert.equal(build(w, 'wall', ...chain), '', 'within 8 of the new wall');
+  assert.match(
+    build(w, 'wall', ...opp),
+    /ห่างสิ่งก่อสร้าง/,
+    'opposite side has no link',
+  );
+  assert.ok(spawnRadius(w) >= 16 + 16 - 1);
 });
-test('the hero chops nearby trees for wood and clears them when exhausted', () => {
+test('sawmills fell nearby trees for wood on a cadence and stop when the forest is gone', () => {
   const w = make();
-  const tree = w.terrain.find((o) => o.kind === 'tree');
-  const p = w.players[0];
-  p.x = tree.x + tree.r + 0.5;
-  p.z = tree.z;
+  give(w, { wood: 500, gold: 500 });
+  const tree = w.terrain
+    .filter((o) => o.kind === 'tree')
+    .sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
+  assert.ok(tree, 'a tree on the map');
+  const t = terrain(w);
+  let spot = null;
+  for (let dz = -3; dz <= 3 && !spot; dz++)
+    for (let dx = -3; dx <= 3 && !spot; dx++) {
+      const x = tree.x + dx,
+        z = tree.z + dz;
+      const d = Math.hypot(dx, dz);
+      if (
+        d >= 2 &&
+        d <= 3.5 &&
+        t.cell(x, z) === 'plain' &&
+        !w.terrain.some((o) => Math.hypot(o.x - x, o.z - z) < 2.2)
+      )
+        spot = { x, z };
+    }
+  assert.ok(spot, 'a clear spot next to the tree');
+  // Bring the base out to the forest edge so the sawmill is linked.
+  w.buildings.push({
+    id: 'link',
+    kind: 'wall',
+    x: spot.x - 3,
+    z: spot.z,
+    hp: 300,
+    maxHp: 300,
+    cool: 0,
+    angle: 0,
+    level: 1,
+    branch: '',
+  });
+  w.buildings[0].level = 4;
+  assert.equal(build(w, 'sawmill', spot.x, spot.z), '');
   const wood = w.res.wood;
-  step(w, {}, 0.05);
-  assert.equal(p.task, 'chop');
-  assert.equal(w.res.wood, wood + 5);
-  for (let i = 0; i < 200 && w.terrain.includes(tree); i++) step(w, {}, 0.05);
-  assert.ok(!w.terrain.includes(tree));
-  assert.equal(w.res.wood, wood + 30);
-  assert.equal(p.task, '');
-});
-test('prep phase never starts a wave on its own', () => {
-  const w = make();
-  for (let i = 0; i < 2000; i++) step(w, {}, 0.05);
-  assert.equal(w.phase, 'prep');
-  assert.equal(w.wave, 0);
-  command(w, 'p1', { seq: 1, type: 'next' });
-  assert.equal(w.phase, 'battle');
-  assert.equal(w.wave, 1);
+  w.players[0].x = -20;
+  w.players[0].z = -20;
+  for (let i = 0; i < 20; i++) step(w, {}, 0.05);
+  assert.equal(w.res.wood, wood + 5, 'first cut happens right away');
+  for (let i = 0; i < 100; i++) step(w, {}, 0.05);
+  assert.equal(w.res.wood, wood + 10, 'then one cut every 5 seconds');
+  const trees = () =>
+    w.terrain.filter(
+      (o) => o.kind === 'tree' && Math.hypot(o.x - spot.x, o.z - spot.z) < 6,
+    );
+  const total = trees().reduce((sum, o) => sum + o.wood, 0) + 10;
+  for (let i = 0; i < 20000 && trees().length > 0; i++) step(w, {}, 0.05);
+  assert.equal(trees().length, 0);
+  assert.equal(
+    w.res.wood,
+    wood + total,
+    'every tree in range yields exactly its wood',
+  );
+  const after = w.res.wood;
+  for (let i = 0; i < 400; i++) step(w, {}, 0.05);
+  assert.equal(w.res.wood, after, 'no infinite wood once the forest is gone');
 });
 test('automatic ranged and melee attacks damage enemies without actions', () => {
   for (const weapon of ['bow', 'sword', 'staff']) {

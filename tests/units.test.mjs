@@ -89,12 +89,12 @@ test('upgrading a barracks needs free workers', () => {
   w.buildings[0].level = 4;
   assert.equal(workerCap(w), 9);
   for (let i = 0; i < 3; i++) {
-    const t = spotAt(w, 11 + i * 2);
+    const t = spotAt(w, 11 + i);
     cmd(w, { type: 'build', kind: 'tower', ...t });
   }
   assert.equal(workersUsed(w), 6);
-  cmd(w, { type: 'build', kind: 'ballista', ...spotAt(w, 17) });
-  cmd(w, { type: 'build', kind: 'tower', ...spotAt(w, 19) });
+  cmd(w, { type: 'build', kind: 'ballista', ...spotAt(w, 14) });
+  cmd(w, { type: 'build', kind: 'tower', ...spotAt(w, 15) });
   assert.equal(workersUsed(w), 9);
   assert.match(cmd(w, { type: 'upgrade', id: b.id, branch: 'grow' }), /คนงาน/);
 });
@@ -102,7 +102,7 @@ test('rally takes idle soldiers up to the stack, release holds them in place', (
   const w = make(2);
   const p = w.players[0];
   assert.equal(p.stack, BASE_STACK + 2);
-  for (const d of [5, 8, 11, 14, 17]) {
+  for (const d of [5, 8, 11, 13, 15]) {
     const s = spotAt(w, d);
     assert.equal(cmd(w, { type: 'build', kind: 'barracks', ...s }), '');
   }
@@ -128,17 +128,21 @@ test('rally takes idle soldiers up to the stack, release holds them in place', (
       Math.hypot(u.x - p.x, u.z - p.z) < 4,
       'soldier keeps up ' + Math.hypot(u.x - p.x, u.z - p.z),
     );
-  const before = following(w, 'p1').map((u) => ({ x: u.x, z: u.z }));
+  const before = new Map(
+    following(w, 'p1').map((u) => [u.id, { x: u.x, z: u.z }]),
+  );
   assert.equal(cmd(w, { type: 'release' }), '');
   assert.equal(following(w, 'p1').length, 0);
   for (let i = 0; i < 40; i++)
     step(w, { p1: { x: 1, z: 0, commands: [] } }, 0.05);
-  const held = w.units.filter((u) => u.mode === 'hold');
-  for (const [i, u] of held.slice(0, before.length).entries())
+  for (const [id, pos] of before) {
+    const u = w.units.find((x) => x.id === id);
+    assert.equal(u.mode, 'hold');
     assert.ok(
-      Math.hypot(u.x - before[i].x, u.z - before[i].z) < 1.2,
+      Math.hypot(u.x - pos.x, u.z - pos.z) < 1.2,
       'held soldier stays put',
     );
+  }
 });
 test('rally and release work during battle and are limited to your own stack', () => {
   const w = make();

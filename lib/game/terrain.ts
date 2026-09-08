@@ -310,5 +310,39 @@ export function generateObstacles(seed: string, map: MapId): Obstacle[] {
     if (!cellsOf.has(key)) cellsOf.set(key, []);
     cellsOf.get(key)!.push(o);
   }
+  // Every base can reach stone and iron without expanding: guarantee two
+  // rocks and one ore vein on land near the keep.
+  const guarantee = (
+    kind: ObstacleKind,
+    count: number,
+    rMin: number,
+    rMax: number,
+  ) => {
+    let have = out.filter(
+      (o) => o.kind === kind && Math.hypot(o.x, o.z) <= rMax + 0.5,
+    ).length;
+    for (let i = 0; i < 400 && have < count; i++) {
+      const a = r() * Math.PI * 2,
+        d = rMin + r() * (rMax - rMin);
+      const x = Math.round(Math.cos(a) * d),
+        z = Math.round(Math.sin(a) * d);
+      if (!t.land(x, z) || near(x, z, 2.8)) continue;
+      const o: Obstacle = {
+        id: out.length + 1,
+        x,
+        z,
+        r: 0.75 + r() * 0.3,
+        kind,
+        wood: 0,
+      };
+      out.push(o);
+      const key = Math.floor(x / 4) * 1000 + Math.floor(z / 4);
+      if (!cellsOf.has(key)) cellsOf.set(key, []);
+      cellsOf.get(key)!.push(o);
+      have++;
+    }
+  };
+  guarantee('rock', 2, 8, 11);
+  guarantee('ore', 1, 9, 12);
   return out;
 }

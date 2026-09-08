@@ -56,7 +56,7 @@ import {
   RESOURCES,
   RESOURCE_ORDER,
   KEEP_MAX,
-  KEEP_RADIUS,
+  LINK_RADIUS,
   KEEP_WORKERS,
   HALF,
   step,
@@ -894,11 +894,11 @@ export default function Game({
           </DialogTitle>
           <DialogDescription>
             {panel === 'build'
-              ? `เลือกสิ่งก่อสร้าง แล้วลากไปวางในรัศมี ${KEEP_RADIUS[keep?.level || 1]} จากฐานแม่`
+              ? `เลือกสิ่งก่อสร้าง แล้ววางห่างจากสิ่งก่อสร้างเดิมไม่เกิน ${LINK_RADIUS[keep?.level || 1]} ช่อง`
               : panel === 'upgrade'
                 ? 'เดินใกล้อาคารแล้วเลือกสายพัฒนา'
                 : panel === 'keep'
-                  ? 'อัปเกรดฐานแม่เพื่อขยายรัศมีก่อสร้าง เพิ่มคนงาน และปลดล็อกระดับสิ่งก่อสร้าง'
+                  ? 'อัปเกรดฐานแม่เพื่อเพิ่มระยะเชื่อมสิ่งก่อสร้าง เพิ่มคนงาน และปลดล็อกระดับสิ่งก่อสร้าง'
                   : panel === 'perk'
                     ? 'พรนี้จะอยู่กับคุณตลอดรอบนี้'
                     : session.room
@@ -1017,7 +1017,7 @@ export default function Game({
                         <b>{name}</b>
                         <small>
                           {selected.kind === 'keep'
-                            ? `รัศมี ${KEEP_RADIUS[selected.level + 1]} · คนงาน +${KEEP_WORKERS[selected.level + 1] - KEEP_WORKERS[selected.level]} · HP +500`
+                            ? `ระยะเชื่อม ${LINK_RADIUS[selected.level + 1]} · คนงาน +${KEEP_WORKERS[selected.level + 1] - KEEP_WORKERS[selected.level]} · HP +500`
                             : desc}
                         </small>
                         <CostChips cost={upgradeCost(selected)} res={hud.res} />
