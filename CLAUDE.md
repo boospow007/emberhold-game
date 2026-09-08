@@ -73,7 +73,7 @@ The game is split into four layers that must stay separate:
 
 - `app/page.tsx` is the lobby/camp screen (weapon and map pick, room create/join/list, Ember shop). It mounts `app/Game.tsx` with a `Session` once a run starts. Both are `'use client'`.
 - `Game.tsx` keeps the live `World` in a ref and throttles a copy into React state (`setHud`) about every 90ms; do not put the world itself in state.
-- `components/ui/*` is a stock shadcn (base-nova style, `@base-ui/react`) install; only a few pieces (Tabs, Dialog, etc.) are used. Styling for the game itself is hand-written in `app/globals.css`, not Tailwind utility classes.
+- `components/ui/*` is a stock shadcn (base-nova style, `@base-ui/react`) install; only a few pieces (Tabs, Dialog, etc.) are used. Styling for the game itself is hand-written in `app/globals.css`, not Tailwind utility classes. The "UI polish layer" at the end of that file owns rounded surfaces and motion; dialogs animate through base-ui's `data-starting-style`/`data-ending-style` transitions (Tailwind `animate-in/out` is disabled on `.ember-dialog`/`.game-sheet`), so add new dialog styling there rather than fighting the utility classes.
 
 ## Documentation rule
 

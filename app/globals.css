@@ -1738,6 +1738,727 @@ input {
     font-size: 12px;
   }
 }
+
+/* =====================================================================
+   UI polish layer: rounded surfaces, motion, and feedback.
+   Loaded after the base rules so it wins the cascade. Dialogs animate with
+   CSS transitions on base-ui's data-starting-style / data-ending-style so
+   the popup stays mounted until the exit transition finishes.
+   ===================================================================== */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --surface: linear-gradient(165deg, #1d2e30 0%, #142022 60%, #101a1c 100%);
+  --surface-border: #ffffff1c;
+  --glow: 0 0 0 1px #ffffff0a inset, 0 1px 0 #ffffff14 inset;
+}
+@keyframes ui-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.85);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+@keyframes ui-toast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.9);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.03);
+  }
+  18% {
+    transform: translate(-50%, 0) scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -8px) scale(0.96);
+  }
+}
+@keyframes ui-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ui-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ui-bump {
+  0% {
+    transform: scale(1);
+    color: #fff5d9;
+  }
+  40% {
+    transform: scale(1.35);
+    color: #ffe9a8;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes ui-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 #f2c36d66;
+  }
+  100% {
+    box-shadow: 0 0 0 14px #f2c36d00;
+  }
+}
+@keyframes ui-breathe {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.06);
+    opacity: 1;
+  }
+}
+@keyframes ui-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-5px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+@keyframes ui-bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-12deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.15) rotate(4deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+@keyframes ui-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes ui-sheen {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* --- buttons: every button gets press and hover feedback --- */
+button {
+  transition:
+    transform 0.16s var(--ease-out),
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.25s ease,
+    color 0.2s ease,
+    opacity 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+button:not(:disabled):active {
+  transform: scale(0.96);
+}
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px #f2c36d55;
+}
+.primary,
+.secondary,
+.next-wave {
+  border-radius: 15px;
+  position: relative;
+  overflow: hidden;
+}
+.primary {
+  background: linear-gradient(135deg, #f7cf80, #e9b45c);
+  box-shadow:
+    0 6px 18px #f2c36d33,
+    var(--glow);
+}
+.primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 10px 26px #f2c36d4d,
+    var(--glow);
+}
+.primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    #ffffff44 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.primary:not(:disabled):hover::after {
+  opacity: 1;
+  animation: ui-sheen 1.1s var(--ease-out);
+}
+.secondary {
+  background: #ffffff08;
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--glow);
+}
+.secondary:not(:disabled):hover {
+  background: #ffffff10;
+  border-color: #ffffff30;
+}
+.primary:disabled,
+.secondary:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.next-wave {
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f7cf80, #e9b45c);
+  box-shadow: 0 8px 22px #f2c36d3d;
+  animation: ui-pulse-ring 2.4s ease-out infinite;
+}
+.icon-button,
+.camp-button {
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+}
+.icon-button:not(:disabled):hover,
+.camp-button:not(:disabled):hover {
+  background: #ffffff12;
+  border-color: #ffffff2e;
+}
+.camp-button {
+  border-radius: 999px;
+}
+
+/* --- dialogs --- */
+[data-slot='dialog-overlay'] {
+  animation: none !important;
+  background: #06100fa8 !important;
+  backdrop-filter: blur(10px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(1.1) !important;
+  opacity: 1;
+  transition: opacity 0.32s var(--ease-out);
+}
+[data-slot='dialog-overlay'][data-starting-style],
+[data-slot='dialog-overlay'][data-ending-style] {
+  opacity: 0;
+}
+.ember-dialog,
+.game-sheet {
+  animation: none !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--surface-border) !important;
+  box-shadow:
+    0 40px 120px #000a,
+    0 0 0 1px #ffffff06,
+    0 1px 0 #ffffff1c inset;
+  will-change: transform, opacity;
+}
+.ember-dialog {
+  border-radius: 28px !important;
+  padding: 30px !important;
+  transform: scale(1) translateY(0);
+  opacity: 1;
+  transition:
+    transform 0.38s var(--ease-spring),
+    opacity 0.26s var(--ease-out);
+}
+.ember-dialog[data-starting-style],
+.ember-dialog[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.88) translateY(18px);
+}
+.ember-dialog[data-ending-style] {
+  transition:
+    transform 0.22s var(--ease-out),
+    opacity 0.18s ease;
+}
+.game-sheet {
+  translate: -50% 0 !important;
+  transform: translateY(0) !important;
+  border-radius: 30px 30px 0 0 !important;
+  padding: 26px 24px max(30px, env(safe-area-inset-bottom)) !important;
+  opacity: 1;
+  transition:
+    transform 0.42s var(--ease-out),
+    opacity 0.3s ease;
+}
+.game-sheet[data-starting-style],
+.game-sheet[data-ending-style] {
+  transform: translateY(60px) !important;
+  opacity: 0;
+}
+.game-sheet[data-ending-style] {
+  transition:
+    transform 0.24s var(--ease-out),
+    opacity 0.2s ease;
+}
+.game-sheet::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: #ffffff2a;
+  transform: translateX(-50%);
+}
+.ember-dialog [data-slot='dialog-title'],
+.game-sheet [data-slot='dialog-title'],
+.ember-dialog [data-slot='dialog-description'],
+.game-sheet [data-slot='dialog-description'] {
+  animation: ui-rise 0.45s var(--ease-out) both;
+}
+.ember-dialog [data-slot='dialog-description'],
+.game-sheet [data-slot='dialog-description'] {
+  animation-delay: 0.06s;
+}
+.ember-dialog > *:not([data-slot]),
+.game-sheet > *:not([data-slot]) {
+  animation: ui-rise 0.5s var(--ease-out) both;
+  animation-delay: 0.1s;
+}
+.ember-dialog [data-slot='dialog-close'],
+.game-sheet [data-slot='dialog-close'] {
+  top: 14px !important;
+  right: 14px !important;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #ffffff0c;
+  border: 1px solid #ffffff14;
+  animation: ui-fade 0.4s ease both;
+}
+.ember-dialog [data-slot='dialog-close']:hover,
+.game-sheet [data-slot='dialog-close']:hover {
+  background: #ffffff1a;
+  transform: rotate(90deg);
+}
+
+/* --- cards and options --- */
+.choice,
+.map-choice,
+.build-options > button,
+.perk-options button,
+.camp-upgrades > div,
+.saved-seeds > div,
+.resume-card,
+.available-rooms > button,
+.length-row button,
+.member-list > div {
+  border-radius: 18px;
+}
+.choice,
+.map-choice,
+.build-options > button,
+.perk-options button,
+.length-row button {
+  background: #ffffff05;
+  border: 1px solid #ffffff14;
+  box-shadow: var(--glow);
+  transition:
+    transform 0.2s var(--ease-out),
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.3s ease;
+}
+.choice:not(:disabled):hover,
+.map-choice:not(:disabled):hover,
+.build-options > button:not(:disabled):hover,
+.perk-options button:not(:disabled):hover,
+.length-row button:not(:disabled):hover {
+  background: #ffffff0b;
+  border-color: #ffffff2a;
+  transform: translateY(-2px);
+}
+.choice.selected,
+.map-choice.selected,
+.length-row button.selected {
+  background: linear-gradient(160deg, #f2c36d1f, #f2c36d0a);
+  border-color: #f2c36d99;
+  box-shadow:
+    0 0 0 1px #f2c36d33,
+    0 10px 30px #f2c36d1f,
+    var(--glow);
+  transform: translateY(0) scale(1.02);
+}
+.choice.selected svg {
+  animation: ui-bounce-in 0.5s var(--ease-spring);
+}
+.map-choice.selected .radio-dot {
+  animation: ui-bounce-in 0.45s var(--ease-spring);
+}
+.available-rooms > button {
+  padding: 13px 12px;
+  border: 1px solid transparent;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    transform 0.2s var(--ease-out);
+}
+.available-rooms > button:not(:disabled):hover {
+  background: #ffffff07;
+  border-color: #ffffff14;
+}
+.available-rooms > button strong svg {
+  transition: transform 0.2s var(--ease-out);
+}
+.available-rooms > button:hover strong svg {
+  transform: translateX(3px);
+}
+.camp-upgrades > div {
+  padding: 14px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #ffffff10;
+  background: #ffffff04;
+  animation: ui-rise 0.5s var(--ease-out) both;
+}
+.camp-upgrades > div:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.camp-upgrades > div:nth-child(3) {
+  animation-delay: 0.1s;
+}
+.camp-upgrades > div:nth-child(4) {
+  animation-delay: 0.15s;
+}
+.camp-upgrades > div:nth-child(5) {
+  animation-delay: 0.2s;
+}
+.camp-upgrades > div > svg {
+  transition: transform 0.3s var(--ease-spring);
+}
+.camp-upgrades > div:hover > svg {
+  transform: scale(1.15) rotate(-6deg);
+}
+.build-options > button {
+  animation: ui-rise 0.4s var(--ease-out) both;
+}
+.build-options > button:nth-child(2) {
+  animation-delay: 0.04s;
+}
+.build-options > button:nth-child(3) {
+  animation-delay: 0.08s;
+}
+.build-options > button:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.build-options > button:nth-child(5) {
+  animation-delay: 0.16s;
+}
+.build-options > button:nth-child(n + 6) {
+  animation-delay: 0.2s;
+}
+.build-options > button > svg {
+  transition: transform 0.3s var(--ease-spring);
+}
+.build-options > button:not(:disabled):hover > svg {
+  transform: scale(1.2);
+}
+.perk-options button {
+  border-radius: 22px;
+  animation: ui-rise 0.45s var(--ease-out) both;
+}
+.perk-options button:nth-child(2) {
+  animation-delay: 0.07s;
+}
+.perk-options button:nth-child(3) {
+  animation-delay: 0.14s;
+}
+.perk-options button svg {
+  transition: transform 0.35s var(--ease-spring);
+}
+.perk-options button:not(:disabled):hover svg {
+  transform: scale(1.25) rotate(-8deg);
+}
+.build-tabs {
+  border-radius: 999px;
+  padding: 4px;
+  background: #ffffff08;
+  border: 1px solid #ffffff10;
+}
+.build-tabs button {
+  border-radius: 999px;
+  transition:
+    background-color 0.25s ease,
+    color 0.2s ease,
+    transform 0.2s var(--ease-out);
+}
+.build-tabs button[data-active] {
+  background: linear-gradient(135deg, #f7cf80, #e9b45c);
+  color: #192020;
+  box-shadow: 0 6px 16px #f2c36d33;
+}
+.cost-chips i,
+.resource-bar > span {
+  transition:
+    background-color 0.25s,
+    color 0.25s,
+    border-color 0.25s;
+}
+
+/* --- lobby --- */
+.member-list > div {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border: 1px solid #ffffff10;
+  background: #ffffff04;
+  animation: ui-rise 0.4s var(--ease-out) both;
+}
+.member-list > div:nth-child(2) {
+  animation-delay: 0.05s;
+}
+.member-list > div:nth-child(3) {
+  animation-delay: 0.1s;
+}
+.member-list > div:nth-child(4) {
+  animation-delay: 0.15s;
+}
+.online-dot {
+  animation: ui-blink 1.8s ease-in-out infinite;
+}
+.room-code {
+  border-radius: 22px;
+}
+.room-code > b {
+  letter-spacing: 6px;
+  animation: ui-rise 0.5s var(--ease-spring) both;
+}
+.seed-row input {
+  border-radius: 14px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.seed-row input:focus {
+  outline: none;
+  border-color: #f2c36d88;
+  box-shadow: 0 0 0 3px #f2c36d22;
+}
+.resume-card {
+  border-radius: 20px;
+  animation: ui-rise 0.5s var(--ease-out) both;
+}
+.saved-seeds > div {
+  animation: ui-rise 0.4s var(--ease-out) both;
+}
+
+/* --- in-game HUD --- */
+.game-header,
+.top-hud,
+.resource-bar,
+.keep-health,
+.minimap,
+.team-tags {
+  animation: ui-rise 0.6s var(--ease-out) both;
+}
+.resource-bar {
+  animation-delay: 0.1s;
+}
+.top-hud {
+  animation-delay: 0.05s;
+}
+.minimap {
+  animation-delay: 0.15s;
+  border-radius: 16px;
+}
+.game-bottom {
+  animation: ui-rise 0.55s var(--ease-out) both;
+  animation-delay: 0.2s;
+}
+.resource-bar > span b {
+  display: inline-block;
+  animation: ui-bump 0.45s var(--ease-out);
+}
+.resource-bar > span.strain {
+  animation: ui-blink 1.2s ease-in-out infinite;
+}
+.round-action {
+  border-radius: 24px;
+}
+.round-action:not(:disabled):hover {
+  background: #1d3531f0;
+  border-color: #f2c36d99;
+  box-shadow: 0 10px 28px #0005;
+}
+.round-action svg {
+  transition: transform 0.3s var(--ease-spring);
+}
+.round-action:not(:disabled):hover svg {
+  transform: scale(1.15);
+}
+.squad-button {
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  animation: ui-pop 0.4s var(--ease-spring) both;
+  transform-origin: center;
+}
+.squad-button {
+  animation-name: ui-rise;
+}
+.perk-button {
+  border-radius: 999px;
+  animation:
+    glow 2s infinite,
+    ui-pulse-ring 2s ease-out infinite;
+}
+.game-toast {
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 40px #0006;
+  animation: ui-toast 3s var(--ease-out) both;
+}
+.respawn {
+  border-radius: 24px;
+  backdrop-filter: blur(12px);
+  animation: ui-breathe 2.4s ease-in-out infinite;
+}
+.respawn svg {
+  color: #f6a29b;
+  animation: ui-blink 1s ease-in-out infinite;
+}
+.joystick {
+  animation: ui-fade 0.15s ease both;
+  border-width: 2px;
+  box-shadow: 0 0 30px #ffebba22;
+}
+.joystick i {
+  transition: transform 0.05s linear;
+}
+.placement-bar {
+  border-radius: 22px;
+  backdrop-filter: blur(12px);
+  animation: ui-rise 0.35s var(--ease-out) both;
+}
+.network-notice {
+  border-radius: 16px;
+  animation:
+    ui-rise 0.35s var(--ease-out) both,
+    ui-shake 0.5s ease 0.35s;
+}
+.keep-health i {
+  transition:
+    width 0.5s var(--ease-out),
+    background-color 0.4s;
+  background: linear-gradient(90deg, #e6bd6b, #f7d78f);
+}
+.keep-health > div {
+  border-radius: 999px;
+}
+.hero-status {
+  border-radius: 999px;
+}
+.xp-bar i {
+  transition: width 0.35s var(--ease-out);
+}
+.xp-bar {
+  border-radius: 999px;
+}
+.wave-label strong b {
+  display: inline-block;
+  animation: ui-rise 0.5s var(--ease-spring) both;
+}
+.battle-hint {
+  border-radius: 18px;
+  animation: ui-fade 0.4s ease both;
+}
+
+/* --- results --- */
+.result-dialog .result-icon {
+  animation: ui-bounce-in 0.7s var(--ease-spring) both;
+  animation-delay: 0.1s;
+}
+.result-dialog .results-grid > span {
+  animation: ui-rise 0.5s var(--ease-out) both;
+}
+.result-dialog .results-grid > span:nth-child(1) {
+  animation-delay: 0.25s;
+}
+.result-dialog .results-grid > span:nth-child(2) {
+  animation-delay: 0.35s;
+}
+.result-dialog .results-grid > span:nth-child(3) {
+  animation-delay: 0.45s;
+}
+.result-dialog .earned {
+  animation: ui-bounce-in 0.6s var(--ease-spring) both;
+  animation-delay: 0.6s;
+}
+.result-dialog .earned svg {
+  animation: ui-blink 1.6s ease-in-out infinite;
+}
+.result-dialog .primary.wide {
+  animation: ui-rise 0.5s var(--ease-out) both;
+  animation-delay: 0.75s;
+}
+
+/* --- home screen --- */
+.title-block h1 {
+  animation: ui-rise 0.8s var(--ease-out) both;
+}
+.title-block p,
+.title-details {
+  animation: ui-rise 0.8s var(--ease-out) both;
+  animation-delay: 0.15s;
+}
+.setup {
+  animation: ui-rise 0.8s var(--ease-out) both;
+  animation-delay: 0.25s;
+}
+.setup .primary.wide {
+  border-radius: 18px;
+}
+.setup .secondary.wide {
+  border-radius: 18px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

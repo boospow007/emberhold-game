@@ -547,7 +547,7 @@ export default function Game({
           return (
             <span key={k} title={RESOURCES[k].name}>
               <Icon size={13} />
-              <b>{Math.floor(hud.res[k])}</b>
+              <b key={Math.floor(hud.res[k])}>{Math.floor(hud.res[k])}</b>
             </span>
           );
         })}
@@ -1116,7 +1116,11 @@ export default function Game({
           )}
         </DialogContent>
       </Dialog>
-      {toast && <output className="game-toast">{toast}</output>}
+      {toast && (
+        <output key={toast} className="game-toast">
+          {toast}
+        </output>
+      )}
     </main>
   );
 }
