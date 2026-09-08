@@ -61,6 +61,46 @@ test('free placement enforces terrain, resources, tier, radius and phase rules',
   startWave(w);
   assert.notEqual(build(w, 'tower', -4, 0), '');
 });
+test('buildings keep a snapped facing angle from the build command', () => {
+  const w = make();
+  give(w, { wood: 500, gold: 500 });
+  assert.equal(
+    command(w, 'p1', {
+      type: 'build',
+      seq: 901,
+      kind: 'tower',
+      x: 4,
+      z: 0,
+      angle: Math.PI / 2,
+    }),
+    '',
+  );
+  assert.ok(Math.abs(w.buildings.at(-1).angle - Math.PI / 2) < 1e-9);
+  assert.equal(
+    command(w, 'p1', {
+      type: 'build',
+      seq: 902,
+      kind: 'wall',
+      x: -4,
+      z: 0,
+      angle: -Math.PI / 2 + 0.2,
+    }),
+    '',
+  );
+  assert.ok(Math.abs(w.buildings.at(-1).angle - (3 * Math.PI) / 2) < 1e-9);
+  assert.equal(
+    command(w, 'p1', {
+      type: 'build',
+      seq: 903,
+      kind: 'wall',
+      x: 0,
+      z: -4,
+      angle: 'x',
+    }),
+    '',
+  );
+  assert.equal(w.buildings.at(-1).angle, 0);
+});
 test('defense buildings are limited by workers from keep and houses', () => {
   const w = make();
   give(w, { wood: 500, gold: 500 });

@@ -1471,7 +1471,7 @@ export class GameScene {
   render(
     w: World,
     localId: string,
-    placement: { kind: BuildKind; x: number; z: number } | null,
+    placement: { kind: BuildKind; x: number; z: number; angle?: number } | null,
   ) {
     this.localId = localId;
     const now = performance.now(),
@@ -1635,6 +1635,7 @@ export class GameScene {
       const base = b.kind === 'keep' ? 1 + (b.level - 1) * 0.08 : 1;
       g.scale.setScalar(base * pop * overshoot);
       g.rotation.z = wobble;
+      g.rotation.y = b.angle || 0;
       this.health(g, b.hp, b.maxHp, b.kind === 'keep' ? 5.3 : 3.3);
     }
     for (const u of [...w.players, ...w.enemies]) {
@@ -1872,6 +1873,12 @@ export class GameScene {
         this.y(placement.x, placement.z) + Math.sin(now * 0.004) * 0.08 + 0.08,
         placement.z,
       );
+      const wantY = placement.angle || 0;
+      this.ghost.rotation.y +=
+        Math.atan2(
+          Math.sin(wantY - this.ghost.rotation.y),
+          Math.cos(wantY - this.ghost.rotation.y),
+        ) * Math.min(1, dt * 14);
       const valid = canBuild(w, placement.kind, placement.x, placement.z);
       const ring = this.ghost.getObjectByName('placement-ring');
       if (ring) {

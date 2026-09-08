@@ -110,6 +110,7 @@ export type Command = {
   z?: number;
   id?: string;
   branch?: string;
+  angle?: number;
 };
 export type Input = { x: number; z: number; commands: Command[] };
 export type World = {
@@ -489,6 +490,14 @@ export function branches(kind: Building['kind']) {
       ? ['keep']
       : ['grow'];
 }
+// Buildings face one of four directions; anything else snaps to the nearest.
+export function snapAngle(a: unknown) {
+  const v = Number(a);
+  if (!Number.isFinite(v)) return 0;
+  const q = Math.PI / 2;
+  const n = ((Math.round(v / q) % 4) + 4) % 4;
+  return n * q;
+}
 export function nodeAt(w: World, kind: BuildKind, x: number, z: number) {
   const need = BUILDINGS[kind].node;
   if (!need) return null;
@@ -759,7 +768,7 @@ export function command(w: World, pid: string, c: Command): string {
       hp: d.hp,
       maxHp: d.hp,
       cool: 0,
-      angle: 0,
+      angle: snapAngle(c.angle),
       level: 1,
       branch: '',
     };

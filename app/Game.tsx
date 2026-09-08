@@ -34,6 +34,8 @@ import {
   Tent,
   Flag,
   Footprints,
+  RotateCcw,
+  RotateCw,
 } from 'lucide-react';
 import {
   Dialog,
@@ -156,7 +158,12 @@ export default function Game({
     input = useRef<Input>(emptyInput()),
     remote = useRef<Record<string, Input>>({}),
     seq = useRef(session.world.acks?.[session.profile.id] || 0),
-    placement = useRef<{ kind: BuildKind; x: number; z: number } | null>(null),
+    placement = useRef<{
+      kind: BuildKind;
+      x: number;
+      z: number;
+      angle: number;
+    } | null>(null),
     paused = useRef(false),
     panelRef = useRef(''),
     overSaved = useRef(false);
@@ -167,6 +174,7 @@ export default function Game({
       kind: BuildKind;
       x: number;
       z: number;
+      angle: number;
     } | null>(null),
     [toast, setToast] = useState(''),
     [error, setError] = useState(''),
@@ -425,7 +433,18 @@ export default function Game({
       kind,
       x: Math.round(p.x * 2) / 2,
       z: Math.round((p.z - 3) * 2) / 2,
+      angle: lastAngle.current,
     });
+  }
+  const lastAngle = useRef(0);
+  function rotatePlacement(dir: 1 | -1) {
+    const cur = placement.current;
+    if (!cur) return;
+    const next =
+      (((cur.angle + (dir * Math.PI) / 2) % (Math.PI * 2)) + Math.PI * 2) %
+      (Math.PI * 2);
+    lastAngle.current = next;
+    setPlacement({ ...cur, angle: next });
   }
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
   function down(e: React.PointerEvent) {
@@ -800,6 +819,30 @@ export default function Game({
             {(me && buildError(hud, me, place.kind, place.x, place.z)) ||
               `ลากบนพื้นเพื่อวาง ${BUILDINGS[place.kind].name}`}
           </span>
+          <div className="rotate-row">
+            <button
+              className="secondary"
+              aria-label="หมุนซ้าย"
+              onClick={() => rotatePlacement(-1)}
+            >
+              <RotateCcw size={17} />
+            </button>
+            <span className="facing">
+              หันไปทาง{' '}
+              {
+                ['เหนือ', 'ตะวันออก', 'ใต้', 'ตะวันตก'][
+                  Math.round(place.angle / (Math.PI / 2)) % 4
+                ]
+              }
+            </span>
+            <button
+              className="secondary"
+              aria-label="หมุนขวา"
+              onClick={() => rotatePlacement(1)}
+            >
+              <RotateCw size={17} />
+            </button>
+          </div>
           <div>
             <button className="secondary" onClick={() => setPlacement(null)}>
               <X size={17} /> ยกเลิก
