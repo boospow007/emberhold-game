@@ -37,6 +37,7 @@
 | 2026-09-08 | เฟส 3: หน่วยทหาร 3 ชนิด ค่ายทหาร ระบบรวมพล/ปลด stack จากโปรไฟล์                             | [2026-09-08-phase3-units.md](2026-09-08-phase3-units.md)           |
 | 2026-09-08 | เฟส 4: เลือกความยาว 30–150 วัน/ไม่จำกัด Final wave Boss wave ชนะ และ save กลาง run          | [2026-09-08-phase4-length.md](2026-09-08-phase4-length.md)         |
 | 2026-09-08 | เฟส 5: co-op เข้าร่วมกลางเกม กลับเข้าห้องหลังหลุด ห้องที่เล่นอยู่ในรายการ                   | [2026-09-08-phase5-latejoin.md](2026-09-08-phase5-latejoin.md)     |
+| 2026-09-08 | Game Doc PvP และ netcode server-authoritative (ร่าง v0.1) | [game-doc/07-modes-netcode.md](game-doc/07-modes-netcode.md) |
 | 2026-09-08 | ปรับ UI: modal โค้งมน gradient และ animation ครบ (dialog, ปุ่ม, การ์ด, HUD, toast, ผลลัพธ์) | [2026-09-08-ui-polish.md](2026-09-08-ui-polish.md)                 |
 
 ## เอกสารอ้างอิง (`ref-game/`)
