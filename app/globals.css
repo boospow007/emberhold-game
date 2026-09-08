@@ -2750,15 +2750,15 @@ div {
 footer {
   color: #b1bc8d;
 }
-/* Remove both legacy transform and Tailwind individual translate. There is one position owner. */
+/* This popup has no inherited positioning utilities. Use a single transform. */
 .ember-popup.ember-dialog,
 .ember-popup.game-sheet {
   position: fixed !important;
   inset: auto !important;
   top: calc(var(--visual-top, 0px) + var(--visual-height, 100dvh)/2) !important;
   left: 50% !important;
-  translate: -50% -50% !important;
-  transform: none !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 50;
   width: min(480px, calc(100% - 24px)) !important;
   max-width: calc(100% - 24px) !important;
   height: auto !important;
