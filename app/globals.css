@@ -1797,6 +1797,27 @@ input {
     transform: translateY(0);
   }
 }
+@keyframes ui-rise-centered {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes ui-breathe-x {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateX(-50%) scale(1.06);
+    opacity: 1;
+  }
+}
 @keyframes ui-fade {
   from {
     opacity: 0;
@@ -2294,10 +2315,13 @@ button:focus-visible {
 .game-header,
 .top-hud,
 .resource-bar,
-.keep-health,
 .minimap,
 .team-tags {
   animation: ui-rise 0.6s var(--ease-out) both;
+}
+/* Horizontally centered overlays keep their translateX(-50%) while rising. */
+.keep-health {
+  animation: ui-rise-centered 0.6s var(--ease-out) both;
 }
 .resource-bar {
   animation-delay: 0.1s;
@@ -2358,7 +2382,7 @@ button:focus-visible {
 .respawn {
   border-radius: 24px;
   backdrop-filter: blur(12px);
-  animation: ui-breathe 2.4s ease-in-out infinite;
+  animation: ui-breathe-x 2.4s ease-in-out infinite;
 }
 .respawn svg {
   color: #f6a29b;
@@ -2375,7 +2399,13 @@ button:focus-visible {
 .placement-bar {
   border-radius: 22px;
   backdrop-filter: blur(12px);
-  animation: ui-rise 0.35s var(--ease-out) both;
+  animation: ui-rise-centered 0.35s var(--ease-out) both;
+}
+.placement-bar > div {
+  flex-wrap: wrap;
+}
+.placement-bar button {
+  min-width: 120px;
 }
 .network-notice {
   border-radius: 16px;
@@ -2437,6 +2467,48 @@ button:focus-visible {
 .result-dialog .primary.wide {
   animation: ui-rise 0.5s var(--ease-out) both;
   animation-delay: 0.75s;
+}
+
+/* --- small screens: keep dialogs inside the viewport --- */
+.ember-dialog {
+  max-height: min(92dvh, calc(100vh - 24px)) !important;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+@media (max-width: 700px) {
+  .ember-dialog {
+    padding: 22px 20px !important;
+    border-radius: 24px !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+  .result-dialog {
+    gap: 12px !important;
+  }
+  .result-dialog .result-icon {
+    width: 56px;
+    height: 56px;
+  }
+  .result-dialog .primary.wide,
+  .result-dialog .secondary.wide,
+  .result-dialog .secondary {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+  .game-sheet {
+    padding: 22px 18px max(22px, env(safe-area-inset-bottom)) !important;
+    max-height: 84dvh;
+  }
+}
+@media (max-height: 700px) {
+  .ember-dialog {
+    padding: 20px 18px !important;
+  }
+  .result-dialog {
+    gap: 10px !important;
+  }
+  .result-dialog [data-slot='dialog-description'] {
+    display: none;
+  }
 }
 
 /* --- home screen --- */
