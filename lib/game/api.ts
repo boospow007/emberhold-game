@@ -1,10 +1,23 @@
 import type { Profile, Weapon, MapId, Input, World } from './engine';
-export type RoomInfo = { code: string; host: boolean; map: MapId };
+export type RoomInfo = {
+  code: string;
+  host: boolean;
+  map: MapId;
+  seed: string;
+};
 export type RoomSummary = {
   code: string;
   name: string;
   map: MapId;
   count: number;
+};
+export type SavedSeed = {
+  id: string;
+  seed: string;
+  map: MapId;
+  name: string;
+  best: number;
+  created: number;
 };
 export type LobbyMember = Profile & {
   weapon: Weapon;
@@ -22,9 +35,13 @@ type Results = {
   lobby: {
     status: string;
     map: MapId;
+    seed: string;
     players: LobbyMember[];
     snapshot: World | null;
   };
+  seeds: { seeds: SavedSeed[] };
+  'seed-save': { seeds: SavedSeed[] };
+  'seed-delete': { seeds: SavedSeed[] };
   sync: Results['lobby'];
   leave: { ok: boolean };
   'solo-reward': { profile: Profile };

@@ -125,3 +125,45 @@ test('solo rewards persist and cannot be redeemed twice', async () => {
   assert.equal(bought.profile.points, 0);
   assert.equal((await c('purchase', { item: 'frost' })).status, 400);
 });
+test('rooms carry a seed and profiles can save, list and delete seeds', async () => {
+  const host = client(),
+    guest = client();
+  await host('profile');
+  const r = await host('create', {
+    map: 'snow',
+    weapon: 'staff',
+    seed: 'te-st 42!',
+  });
+  assert.equal(r.seed, 'TEST42');
+  try {
+    const j = await guest('join', { code: r.code, weapon: 'bow' });
+    assert.equal(j.seed, 'TEST42');
+    assert.equal((await guest('lobby', { code: r.code })).seed, 'TEST42');
+  } finally {
+    await host('leave', { code: r.code });
+  }
+  const saved = await host('seed-save', {
+    seed: 'TEST42',
+    map: 'snow',
+    wave: 7,
+  });
+  assert.equal(saved.seeds.length, 1);
+  assert.equal(saved.seeds[0].best, 7);
+  const again = await host('seed-save', {
+    seed: 'TEST42',
+    map: 'snow',
+    wave: 3,
+    name: 'fav',
+  });
+  assert.equal(again.seeds.length, 1);
+  assert.equal(again.seeds[0].best, 7);
+  assert.equal(again.seeds[0].name, 'fav');
+  assert.equal(
+    (await host('seed-save', { seed: 'x', map: 'snow' })).status,
+    400,
+  );
+  assert.equal((await host('seeds')).seeds.length, 1);
+  assert.equal((await guest('seeds')).seeds.length, 0);
+  const gone = await host('seed-delete', { id: again.seeds[0].id });
+  assert.equal(gone.seeds.length, 0);
+});

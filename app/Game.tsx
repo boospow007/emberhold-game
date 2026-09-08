@@ -28,6 +28,9 @@ import {
   Gem,
   Logs,
   Crosshair,
+  Fish,
+  Waypoints,
+  Bookmark,
 } from 'lucide-react';
 import {
   Dialog,
@@ -54,6 +57,7 @@ import {
   KEEP_MAX,
   KEEP_RADIUS,
   KEEP_WORKERS,
+  HALF,
   step,
   command,
   dist,
@@ -93,6 +97,8 @@ const BUILD_ICON: Record<BuildKind, typeof Coins> = {
   frost: Sparkles,
   shrine: Heart,
   ballista: Crosshair,
+  bridge: Waypoints,
+  fisher: Fish,
 };
 function CostChips({
   cost,
@@ -154,6 +160,7 @@ export default function Game({
     [quit, setQuit] = useState(false),
     [saved, setSaved] = useState(false),
     [saving, setSaving] = useState(false),
+    [seedSaved, setSeedSaved] = useState(false),
     [joystick, setJoystick] = useState<{
       x: number;
       y: number;
@@ -190,7 +197,7 @@ export default function Game({
     if (!mount.current) return;
     let renderer: GameScene;
     try {
-      renderer = new GameScene(mount.current, world.current.map);
+      renderer = new GameScene(mount.current, world.current);
       scene.current = renderer;
     } catch {
       setError('อุปกรณ์นี้เปิดภาพ 3D ไม่ได้ กรุณาลองเบราว์เซอร์ที่รองรับ WebGL');
@@ -453,6 +460,8 @@ export default function Game({
             EMBERHOLD
             <small>
               {session.room ? 'ROOM ' + session.room.code : MAPS[hud.map].en}
+              {' · '}
+              {hud.seed}
             </small>
           </span>
         </div>
@@ -532,14 +541,20 @@ export default function Game({
           <i
             key={b.id}
             className={b.kind === 'keep' ? 'keep-dot' : 'building-dot'}
-            style={{ left: 50 + b.x * 1.9 + '%', top: 50 + b.z * 1.9 + '%' }}
+            style={{
+              left: 50 + (b.x / HALF) * 48 + '%',
+              top: 50 + (b.z / HALF) * 48 + '%',
+            }}
           />
         ))}
         {hud.enemies.map((e) => (
           <i
             key={e.id}
             className="enemy-dot"
-            style={{ left: 50 + e.x * 1.9 + '%', top: 50 + e.z * 1.9 + '%' }}
+            style={{
+              left: 50 + (e.x / HALF) * 48 + '%',
+              top: 50 + (e.z / HALF) * 48 + '%',
+            }}
           />
         ))}
         {hud.players.map((p) => (
@@ -548,8 +563,8 @@ export default function Game({
             className="player-dot"
             style={{
               background: '#' + p.color.toString(16),
-              left: 50 + p.x * 1.9 + '%',
-              top: 50 + p.z * 1.9 + '%',
+              left: 50 + (p.x / HALF) * 48 + '%',
+              top: 50 + (p.z / HALF) * 48 + '%',
             }}
           />
         ))}
@@ -963,6 +978,26 @@ export default function Game({
           <div className="earned">
             <Sparkles /> +{reward(hud)} แต้มเปลวไฟ
           </div>
+          <button
+            className="secondary wide"
+            disabled={seedSaved}
+            onClick={async () => {
+              try {
+                await api('seed-save', {
+                  seed: hud.seed,
+                  map: hud.map,
+                  wave: Math.max(0, hud.wave - 1),
+                });
+                setSeedSaved(true);
+                setToast('บันทึก seed แล้ว เล่นซ้ำได้จากค่ายพัก');
+              } catch (e) {
+                setToast((e as Error).message);
+              }
+            }}
+          >
+            <Bookmark size={16} />{' '}
+            {seedSaved ? `บันทึก SEED ${hud.seed} แล้ว` : `บันทึก SEED ${hud.seed}`}
+          </button>
           <button
             className="primary wide"
             disabled={saving}

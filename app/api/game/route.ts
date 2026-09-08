@@ -1,6 +1,7 @@
 import { database } from '@/db/raw';
 import {
   reward,
+  normalizeSeed,
   type World,
   type Profile,
   type MapId,
@@ -11,6 +12,7 @@ type DbProfile = Omit<Profile, 'unlocks'> & { unlocks: string };
 type DbRoom = {
   host: string;
   map: MapId;
+  seed: string;
   updated: number;
   snapshot: string | null;
   status: string;
@@ -24,6 +26,8 @@ type Payload = {
   weapon: Weapon;
   code: string;
   run: string;
+  seed: string;
+  id: string;
   points: number;
   wave: number;
   input: Input;
@@ -139,6 +143,66 @@ export async function POST(req: Request) {
         ),
       });
     }
+    if (
+      b.action === 'seeds' ||
+      b.action === 'seed-save' ||
+      b.action === 'seed-delete'
+    ) {
+      if (b.action === 'seed-save') {
+        const seed = normalizeSeed(b.seed);
+        if (!seed || !['forest', 'desert', 'snow'].includes(b.map))
+          return result({ error: 'seed ไม่ถูกต้อง' }, 400);
+        const count = await db
+          .prepare('SELECT COUNT(*) AS n FROM seeds WHERE profile=?')
+          .bind(id)
+          .first<{ n: number }>();
+        const exists = await db
+          .prepare('SELECT id FROM seeds WHERE profile=? AND seed=? AND map=?')
+          .bind(id, seed, b.map)
+          .first<{ id: string }>();
+        if (!exists && (count?.n || 0) >= 20)
+          return result({ error: 'บันทึก seed ได้สูงสุด 20 รายการ' }, 400);
+        const wave = Math.max(
+          0,
+          Math.min(999, Math.floor(Number(b.wave) || 0)),
+        );
+        if (exists)
+          await db
+            .prepare(
+              "UPDATE seeds SET best=MAX(best,?),name=COALESCE(NULLIF(?,''),name) WHERE id=?",
+            )
+            .bind(wave, valid(b.name, 30) ? b.name.trim() : '', exists.id)
+            .run();
+        else
+          await db
+            .prepare(
+              'INSERT INTO seeds(id,profile,seed,map,name,best,created) VALUES(?,?,?,?,?,?,?)',
+            )
+            .bind(
+              crypto.randomUUID(),
+              id,
+              seed,
+              b.map,
+              valid(b.name, 30) ? b.name.trim() : '',
+              wave,
+              now,
+            )
+            .run();
+      } else if (b.action === 'seed-delete') {
+        if (!valid(b.id, 60)) return result({ error: 'ไม่พบ seed' }, 400);
+        await db
+          .prepare('DELETE FROM seeds WHERE id=? AND profile=?')
+          .bind(b.id, id)
+          .run();
+      }
+      const rows = await db
+        .prepare(
+          'SELECT id,seed,map,name,best,created FROM seeds WHERE profile=? ORDER BY created DESC LIMIT 20',
+        )
+        .bind(id)
+        .all();
+      return result({ seeds: rows.results });
+    }
     if (b.action === 'list') {
       const rooms = await db
         .prepare(
@@ -161,6 +225,7 @@ export async function POST(req: Request) {
           .bind(id, now - 86400000),
         db.prepare('DELETE FROM members WHERE updated<?').bind(now - 86400000),
       ]);
+      const seed = normalizeSeed(b.seed || '');
       let code = '';
       for (let i = 0; i < 5; i++) {
         code = String(
@@ -168,9 +233,9 @@ export async function POST(req: Request) {
         );
         const r = await db
           .prepare(
-            'INSERT OR IGNORE INTO rooms(code,host,name,map,updated) VALUES(?,?,?,?,?)',
+            'INSERT OR IGNORE INTO rooms(code,host,name,map,seed,updated) VALUES(?,?,?,?,?,?)',
           )
-          .bind(code, id, profile.name, b.map, now)
+          .bind(code, id, profile.name, b.map, seed, now)
           .run();
         if (r.meta.changes) break;
         code = '';
@@ -180,7 +245,7 @@ export async function POST(req: Request) {
         .prepare('INSERT INTO members(id,room,weapon,updated) VALUES(?,?,?,?)')
         .bind(id, code, b.weapon, now)
         .run();
-      return result({ code, host: true, map: b.map });
+      return result({ code, host: true, map: b.map, seed });
     }
     if (b.action === 'join') {
       if (
@@ -203,7 +268,12 @@ export async function POST(req: Request) {
         .bind(id, b.code, b.weapon, now, b.code, now - 45000)
         .run();
       if (!r.meta.changes) return result({ error: 'ห้องเต็มแล้ว' }, 409);
-      return result({ code: b.code, host: room.host === id, map: room.map });
+      return result({
+        code: b.code,
+        host: room.host === id,
+        map: room.map,
+        seed: room.seed || '',
+      });
     }
     if (b.action === 'solo-reward') {
       if (
@@ -316,7 +386,10 @@ export async function POST(req: Request) {
             !Array.isArray(s.buildings) ||
             s.buildings.length > 90 ||
             !['prep', 'battle', 'over'].includes(s.phase) ||
-            !valid(s.run, 60)
+            !valid(s.run, 60) ||
+            !valid(s.seed, 8) ||
+            !Array.isArray(s.terrain) ||
+            s.terrain.length > 400
           )
             return result({ error: 'สถานะเกมไม่ถูกต้อง' }, 400);
           await db
@@ -365,6 +438,7 @@ export async function POST(req: Request) {
       return result({
         status: room.status,
         map: room.map,
+        seed: room.seed || '',
         players: players.results.map((p) => ({
           ...profileRow(p),
           weapon: p.weapon,

@@ -23,9 +23,11 @@ npm run db:generate                # drizzle-kit generate -> drizzle/*.sql
 Tests use `node:test`, no test runner package:
 
 ```bash
-node --experimental-strip-types --test tests/engine.test.mjs   # pure engine, no server
-node --experimental-strip-types --test tests/coop.test.mjs     # needs dev server running
+node --experimental-strip-types --test tests/engine.test.mjs tests/terrain.test.mjs   # pure engine, no server
+node --experimental-strip-types --test tests/coop.test.mjs                            # needs dev server running
 ```
+
+Engine files import each other with explicit `.ts` extensions (`./terrain.ts`) because Node's type stripping needs them; `allowImportingTsExtensions` is on in tsconfig.
 
 Run a single test with `--test-name-pattern`:
 
@@ -35,17 +37,25 @@ node --experimental-strip-types --test --test-name-pattern="respawns" tests/engi
 
 `coop.test.mjs` hits `/api/game` at `GAME_TEST_ORIGIN` (default `http://localhost:3000`), creates real anonymous profiles, and cleans up its room. Dev only.
 
-Local D1 state lives in `.wrangler/state/v3/d1`. The `drizzle/*.sql` migrations must be applied there before the API works; Sites applies them automatically on deploy. The Worker bindings (D1 as `DB`) are declared inline in `vite.config.ts` from `.openai/hosting.json`, not in a root `wrangler.toml`.
+Local D1 state lives in `.wrangler/state/v3/d1`. The `drizzle/*.sql` migrations must be applied there before the API works; Sites applies them automatically on deploy. There is no migrations table locally, so apply a new migration directly to the Miniflare SQLite file (`wrangler d1 execute` with `dist/server/wrangler.json` targets a different persist path and will not work):
+
+```bash
+sed 's/--> statement-breakpoint//g' drizzle/0002_chief_shatterstar.sql | sqlite3 .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite
+```
+
+The Worker bindings (D1 as `DB`) are declared inline in `vite.config.ts` from `.openai/hosting.json`, not in a root `wrangler.toml`.
 
 ## Architecture
 
-The game is split into three layers that must stay separate:
+The game is split into four layers that must stay separate:
+
+**`lib/game/terrain.ts` generates the world from a seed.** Heightmap (water / plain / hill / mountain), river with fords, lakes, and obstacle placement all derive from `(seed, map)` with a deterministic PRNG. Heights are never serialized: `terrainOf()` caches them per client, and only the mutable obstacle list travels in the `World`. Never use `Math.random` in generation code.
 
 **`lib/game/engine.ts` is the authoritative, pure simulation.** It has no React, DOM, or Three.js imports and is what the tests exercise. Key exports: `newWorld`, `addPlayer`, `command`, `canBuild`, `startWave`, `step(world, inputs, dt)`, `reward`, plus the `MAPS` and `BUILDINGS` data tables. `command()` returns an empty string on success or a Thai error message on rejection; callers show that string as a toast. The `World` object is plain JSON so it can be serialized as a room snapshot.
 
 **`lib/game/scene.ts` is render-only.** `GameScene` builds Three.js meshes from a `World` each frame via `render(world, localId, placement)`. It never mutates game state. It also owns pointer-to-world raycasting (`point`) and cleanup (`dispose`).
 
-**`app/api/game/route.ts` is the entire backend.** One `POST` handler dispatching on `body.action`: `profile`, `name`, `purchase`, `list`, `create`, `join`, `solo-reward`, `claim`, `leave`, `sync`, `lobby`. It uses raw D1 prepared statements through `db/raw.ts`. `db/index.ts` (drizzle client) exists but is unused at runtime; `db/schema.ts` exists so `drizzle-kit generate` can produce migrations. If you change the schema, update `db/schema.ts`, regenerate, and keep the raw SQL in the route in sync by hand.
+**`app/api/game/route.ts` is the entire backend.** One `POST` handler dispatching on `body.action`: `profile`, `name`, `purchase`, `list`, `create`, `join`, `solo-reward`, `claim`, `leave`, `sync`, `lobby`. `seeds`, `seed-save`, `seed-delete` manage saved map seeds. It uses raw D1 prepared statements through `db/raw.ts`. `db/index.ts` (drizzle client) exists but is unused at runtime; `db/schema.ts` exists so `drizzle-kit generate` can produce migrations. If you change the schema, update `db/schema.ts`, regenerate, and keep the raw SQL in the route in sync by hand.
 
 `lib/game/api.ts` is the typed client wrapper (`api('action', data)`) with a 10s timeout; its `Results` map is the contract between client and route.
 

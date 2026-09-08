@@ -47,10 +47,7 @@
       "indexes": {
         "idx_members_room_updated": {
           "name": "idx_members_room_updated",
-          "columns": [
-            "room",
-            "updated"
-          ],
+          "columns": ["room", "updated"],
           "isUnique": false
         }
       },
@@ -166,10 +163,7 @@
       "indexes": {
         "idx_rewards_profile_claimed": {
           "name": "idx_rewards_profile_claimed",
-          "columns": [
-            "profile",
-            "claimed"
-          ],
+          "columns": ["profile", "claimed"],
           "isUnique": false
         }
       },
@@ -235,10 +229,7 @@
       "indexes": {
         "idx_rooms_status_updated": {
           "name": "idx_rooms_status_updated",
-          "columns": [
-            "status",
-            "updated"
-          ],
+          "columns": ["status", "updated"],
           "isUnique": false
         }
       },

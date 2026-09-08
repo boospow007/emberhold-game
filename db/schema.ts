@@ -15,6 +15,7 @@ export const rooms = sqliteTable(
     host: text('host').notNull(),
     name: text('name').notNull(),
     map: text('map').notNull(),
+    seed: text('seed').notNull().default(''),
     status: text('status').notNull().default('lobby'),
     snapshot: text('snapshot'),
     updated: integer('updated').notNull(),
@@ -42,4 +43,17 @@ export const rewards = sqliteTable(
     claimed: integer('claimed').notNull().default(0),
   },
   (t) => [index('idx_rewards_profile_claimed').on(t.profile, t.claimed)],
+);
+export const seeds = sqliteTable(
+  'seeds',
+  {
+    id: text('id').primaryKey(),
+    profile: text('profile').notNull(),
+    seed: text('seed').notNull(),
+    map: text('map').notNull(),
+    name: text('name').notNull().default(''),
+    best: integer('best').notNull().default(0),
+    created: integer('created').notNull(),
+  },
+  (t) => [index('idx_seeds_profile_created').on(t.profile, t.created)],
 );

@@ -15,6 +15,13 @@
       "when": 1788852997534,
       "tag": "0001_yellow_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788862941191,
+      "tag": "0002_chief_shatterstar",
+      "breakpoints": true
     }
   ]
 }

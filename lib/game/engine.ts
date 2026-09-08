@@ -1,5 +1,23 @@
+import {
+  HALF,
+  SIZE,
+  type MapId,
+  type Obstacle,
+  type ObstacleKind,
+  terrainOf,
+  generateObstacles,
+  randomSeed,
+  normalizeSeed,
+} from './terrain.ts';
+export type { MapId, Obstacle, ObstacleKind } from './terrain.ts';
+export {
+  HALF,
+  randomSeed,
+  normalizeSeed,
+  weeklySeed,
+  terrainOf,
+} from './terrain.ts';
 export type Weapon = 'bow' | 'sword' | 'staff';
-export type MapId = 'forest' | 'desert' | 'snow';
 export type Resource = 'gold' | 'wood' | 'stone' | 'iron' | 'food';
 export type Cost = Partial<Record<Resource, number>>;
 export type BuildKind =
@@ -13,16 +31,9 @@ export type BuildKind =
   | 'wall'
   | 'frost'
   | 'shrine'
-  | 'ballista';
-export type ObstacleKind = 'tree' | 'rock' | 'ore';
-export type Obstacle = {
-  id: number;
-  x: number;
-  z: number;
-  r: number;
-  kind: ObstacleKind;
-  wood: number;
-};
+  | 'ballista'
+  | 'bridge'
+  | 'fisher';
 export type Profile = {
   id: string;
   name: string;
@@ -89,6 +100,7 @@ export type Input = { x: number; z: number; commands: Command[] };
 export type World = {
   run: string;
   map: MapId;
+  seed: string;
   phase: 'prep' | 'battle' | 'over';
   wave: number;
   timer: number;
@@ -154,6 +166,7 @@ export type BuildInfo = {
   tier: number;
   workers: number;
   node?: ObstacleKind;
+  water?: 'on' | 'near';
   upgrades?: Cost[];
 };
 export const BUILDINGS: Record<BuildKind, BuildInfo> = {
@@ -264,6 +277,26 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     tier: 3,
     workers: 2,
   },
+  bridge: {
+    name: 'สะพาน',
+    cost: { wood: 20 },
+    hp: 200,
+    desc: 'วางบนน้ำ ให้ทุกฝ่ายข้ามธารน้ำได้',
+    tab: 'economy',
+    tier: 1,
+    workers: 0,
+    water: 'on',
+  },
+  fisher: {
+    name: 'กระท่อมชาวประมง',
+    cost: { wood: 25 },
+    hp: 120,
+    desc: 'สร้างริมน้ำ • +8 อาหารต่อระดับเมื่อจบวัน',
+    tab: 'economy',
+    tier: 1,
+    workers: 0,
+    water: 'near',
+  },
 };
 export const KEEP_MAX = 4;
 export const KEEP_UPGRADES: Cost[] = [
@@ -271,7 +304,7 @@ export const KEEP_UPGRADES: Cost[] = [
   { stone: 60, iron: 30 },
   { iron: 60, gold: 200 },
 ];
-export const KEEP_RADIUS = [0, 11, 15, 19, 23];
+export const KEEP_RADIUS = [0, 12, 20, 30, 44];
 export const HOUSE_WORKERS = [0, 2, 5, 10];
 export const KEEP_WORKERS = [0, 3, 5, 7, 9];
 export const START_RES: Record<Resource, number> = {
@@ -286,36 +319,16 @@ export const dist = (
   a: { x: number; z: number },
   b: { x: number; z: number },
 ) => Math.hypot(a.x - b.x, a.z - b.z);
-export function obstacles(map: MapId): Obstacle[] {
-  let seed = map === 'forest' ? 73 : map === 'desert' ? 197 : 331;
-  const rand = () => {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-  const out: Obstacle[] = [];
-  let rocks = 0;
-  for (let i = 0; i < 65; i++) {
-    const x = Math.round((rand() - 0.5) * 46),
-      z = Math.round((rand() - 0.5) * 46);
-    const r = 0.65 + rand() * 0.5;
-    const roll = rand();
-    if (
-      Math.hypot(x, z) < 7 ||
-      out.some((o) => Math.hypot(o.x - x, o.z - z) < 2.8)
-    )
-      continue;
-    let kind: ObstacleKind = map === 'desert' || roll <= 0.3 ? 'rock' : 'tree';
-    if (kind === 'rock' && ++rocks % 3 === 0) kind = 'ore';
-    out.push({
-      id: out.length + 1,
-      x,
-      z,
-      r,
-      kind,
-      wood: kind === 'tree' ? 30 : 0,
-    });
-  }
-  return out;
+export const terrain = (w: World) => terrainOf(w.seed, w.map);
+export const spawnRadius = (w: World) =>
+  Math.min(HALF - 2, buildRadius(w) + 16);
+export function bridgeAt(w: World, x: number, z: number) {
+  return w.buildings.some(
+    (b) => b.kind === 'bridge' && b.hp > 0 && dist(b, { x, z }) < 1.05,
+  );
+}
+export function passable(w: World, x: number, z: number) {
+  return terrain(w).land(x, z) || bridgeAt(w, x, z);
 }
 export const keepOf = (w: World) => w.buildings[0];
 export const buildRadius = (w: World) =>
@@ -376,10 +389,12 @@ export function nodeAt(w: World, kind: BuildKind, x: number, z: number) {
     w.terrain.find((o) => o.kind === need && dist(o, { x, z }) < 1.2) || null
   );
 }
-export function newWorld(map: MapId): World {
+export function newWorld(map: MapId, seed?: string): World {
+  const s = normalizeSeed(seed || '') || randomSeed();
   return {
     run: crypto.randomUUID(),
     map,
+    seed: s,
     phase: 'prep',
     wave: 0,
     timer: 0,
@@ -402,7 +417,7 @@ export function newWorld(map: MapId): World {
         branch: '',
       },
     ],
-    terrain: obstacles(map),
+    terrain: generateObstacles(s, map),
     terrainVersion: 0,
     effects: [],
     gems: [],
@@ -443,13 +458,14 @@ export function canBuild(w: World, kind: BuildKind, x: number, z: number) {
   if (
     !Number.isFinite(x) ||
     !Number.isFinite(z) ||
-    Math.abs(x) > 22 ||
-    Math.abs(z) > 22
+    Math.abs(x) > HALF - 1 ||
+    Math.abs(z) > HALF - 1
   )
     return false;
   if (Math.hypot(x, z) > buildRadius(w)) return false;
   const node = nodeAt(w, kind, x, z);
   if (BUILDINGS[kind].node && !node) return false;
+  if (waterError(w, kind, x, z)) return false;
   return (
     !w.buildings.some(
       (b) =>
@@ -457,6 +473,21 @@ export function canBuild(w: World, kind: BuildKind, x: number, z: number) {
         (b.kind === 'keep' ? 2.6 : b.kind === 'wall' ? 0.8 : 1.1) + r,
     ) && !w.terrain.some((o) => o !== node && dist(o, { x, z }) < o.r + r)
   );
+}
+export function waterError(w: World, kind: BuildKind, x: number, z: number) {
+  const t = terrain(w);
+  const need = BUILDINGS[kind].water;
+  const c = t.cell(x, z);
+  if (need === 'on') return c === 'water' ? '' : 'สะพานต้องวางบนน้ำ';
+  if (c === 'water') return 'วางบนน้ำไม่ได้';
+  if (c === 'mountain') return 'วางบนภูเขาไม่ได้';
+  if (need === 'near') {
+    for (let dz = -2; dz <= 2; dz++)
+      for (let dx = -2; dx <= 2; dx++)
+        if (t.cell(x + dx, z + dz) === 'water') return '';
+    return 'ต้องสร้างริมน้ำ';
+  }
+  return '';
 }
 export function buildGate(w: World, p: Player, kind: BuildKind): string {
   const d = BUILDINGS[kind];
@@ -480,6 +511,8 @@ export function buildError(
   const gate = buildGate(w, p, kind);
   if (gate) return gate;
   if (Math.hypot(x, z) > buildRadius(w)) return 'ไกลจากฐานแม่เกินไป';
+  const water = waterError(w, kind, x, z);
+  if (water) return water;
   if (d.node && !nodeAt(w, kind, x, z))
     return d.node === 'ore' ? 'ต้องวางบนสายแร่' : 'ต้องวางบนหิน';
   if (!canBuild(w, kind, x, z)) return 'พื้นที่นี้วางไม่ได้';
@@ -539,6 +572,10 @@ export function command(w: World, pid: string, c: Command): string {
       clearFields();
     }
     pay(w, d.cost);
+    if (k === 'bridge') {
+      w.terrainVersion++;
+      clearFields();
+    }
     w.buildings.push({
       id: 'b' + ++w.serial,
       kind: k,
@@ -586,6 +623,7 @@ export function income(w: World): Cost {
   const out: Cost = { gold: 20 };
   for (const b of w.buildings) {
     if (b.kind === 'farm') out.food = (out.food || 0) + 10 * b.level;
+    else if (b.kind === 'fisher') out.food = (out.food || 0) + 8 * b.level;
     else if (b.kind === 'goldmine') out.gold = (out.gold || 0) + 20 * b.level;
     else if (b.kind === 'quarry') out.stone = (out.stone || 0) + 12 * b.level;
     else if (b.kind === 'mine') out.iron = (out.iron || 0) + 8 * b.level;
@@ -604,65 +642,85 @@ export function costText(c: Cost) {
     .join(' · ');
 }
 const fields = new Map<string, Int16Array>();
+const cellIndex = (x: number, z: number) => (z + HALF) * SIZE + x + HALF;
+const clampCell = (v: number) =>
+  Math.max(-HALF + 1, Math.min(HALF - 1, Math.round(v)));
+export function fieldFor(w: World, target: { x: number; z: number }) {
+  const obs = w.terrain;
+  const tx = clampCell(target.x),
+    tz = clampCell(target.z);
+  const key =
+    w.seed + ':' + w.map + ':' + w.terrainVersion + ':' + tx + ':' + tz;
+  let field = fields.get(key);
+  if (field) return field;
+  field = new Int16Array(SIZE * SIZE);
+  field.fill(-1);
+  for (let z = -HALF; z <= HALF; z++)
+    for (let x = -HALF; x <= HALF; x++)
+      if (!passable(w, x, z)) field[cellIndex(x, z)] = -2;
+  for (const o of obs) {
+    const rr = o.r + 0.85;
+    for (let z = Math.ceil(o.z - rr); z <= Math.floor(o.z + rr); z++)
+      for (let x = Math.ceil(o.x - rr); x <= Math.floor(o.x + rr); x++)
+        if (
+          Math.abs(x) <= HALF &&
+          Math.abs(z) <= HALF &&
+          Math.hypot(o.x - x, o.z - z) < rr
+        )
+          field[cellIndex(x, z)] = -2;
+  }
+  const queue: number[] = [cellIndex(tx, tz)];
+  field[queue[0]] = 0;
+  let at = 0;
+  while (at < queue.length) {
+    const a = queue[at++],
+      x = a % SIZE,
+      z = Math.floor(a / SIZE);
+    for (const [dx, dz] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const nx = x + dx,
+        nz = z + dz;
+      if (nx < 0 || nx >= SIZE || nz < 0 || nz >= SIZE) continue;
+      const ni = nz * SIZE + nx;
+      if (field[ni] !== -1) continue;
+      field[ni] = field[a] + 1;
+      queue.push(ni);
+    }
+  }
+  if (fields.size > 40) fields.delete(fields.keys().next().value!);
+  fields.set(key, field);
+  return field;
+}
+export function reachable(w: World, x: number, z: number) {
+  const f = fieldFor(w, w.buildings[0]);
+  return f[cellIndex(clampCell(x), clampCell(z))] >= 0;
+}
 function waypoint(
   w: World,
   from: { x: number; z: number },
   target: { x: number; z: number },
 ) {
   const obs = w.terrain;
-  const tx = Math.max(-23, Math.min(23, Math.round(target.x))),
-    tz = Math.max(-23, Math.min(23, Math.round(target.z)));
-  const key = w.map + ':' + w.terrainVersion + ':' + tx + ':' + tz;
-  const size = 49,
-    index = (x: number, z: number) => (z + 24) * size + x + 24;
-  let field = fields.get(key);
-  if (!field) {
-    field = new Int16Array(size * size);
-    field.fill(-1);
-    for (let z = -24; z <= 24; z++)
-      for (let x = -24; x <= 24; x++)
-        if (obs.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + 0.85))
-          field[index(x, z)] = -2;
-    const queue: number[] = [index(tx, tz)];
-    field[queue[0]] = 0;
-    let at = 0;
-    while (at < queue.length) {
-      const a = queue[at++],
-        x = a % size,
-        z = Math.floor(a / size);
-      for (const [dx, dz] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ]) {
-        const nx = x + dx,
-          nz = z + dz;
-        if (nx < 0 || nx >= size || nz < 0 || nz >= size) continue;
-        const ni = nz * size + nx;
-        if (field[ni] !== -1) continue;
-        field[ni] = field[a] + 1;
-        queue.push(ni);
-      }
-    }
-    if (fields.size > 50) fields.delete(fields.keys().next().value!);
-    fields.set(key, field);
-  }
-  const x = Math.max(-23, Math.min(23, Math.round(from.x))),
-    z = Math.max(-23, Math.min(23, Math.round(from.z)));
+  const field = fieldFor(w, target);
+  const x = clampCell(from.x),
+    z = clampCell(from.z);
   let best = { x, z },
     score = 99999;
   for (let dz = -1; dz <= 1; dz++)
     for (let dx = -1; dx <= 1; dx++) {
       const nx = x + dx,
         nz = z + dz;
-      if (Math.abs(nx) > 24 || Math.abs(nz) > 24) continue;
-      const f = field[index(nx, nz)];
+      if (Math.abs(nx) > HALF || Math.abs(nz) > HALF) continue;
+      const f = field[cellIndex(nx, nz)];
       if (f < 0) continue;
       if (
         dx &&
         dz &&
-        (field[index(x + dx, z)] < 0 || field[index(x, z + dz)] < 0)
+        (field[cellIndex(x + dx, z)] < 0 || field[cellIndex(x, z + dz)] < 0)
       )
         continue;
       const v = f + Math.hypot(nx - from.x, nz - from.z) * 0.35;
@@ -702,28 +760,36 @@ function emit(
   });
 }
 function move(
+  w: World,
   u: { x: number; z: number; angle?: number },
   dx: number,
   dz: number,
   speed: number,
   dt: number,
-  obs: Obstacle[],
-  buildings: Building[],
   enemy = false,
 ) {
   const l = Math.hypot(dx, dz);
   if (l < 0.01) return;
   dx /= l;
   dz /= l;
-  const nx = Math.max(-23, Math.min(23, u.x + dx * speed * dt)),
-    nz = Math.max(-23, Math.min(23, u.z + dz * speed * dt));
+  const obs = w.terrain,
+    buildings = w.buildings,
+    t = terrain(w);
+  const lim = HALF - 1;
+  const nx = Math.max(-lim, Math.min(lim, u.x + dx * speed * dt)),
+    nz = Math.max(-lim, Math.min(lim, u.z + dz * speed * dt));
+  if (enemy && t.y(nx, nz) > t.y(u.x, u.z) + 0.05) {
+    speed *= 0.7;
+  }
   const blocked = (x: number, z: number) =>
+    !passable(w, x, z) ||
     obs.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + 0.3) ||
     buildings.some(
       (b) =>
+        b.kind !== 'bridge' &&
         Math.hypot(b.x - x, b.z - z) <
-        (b.kind === 'keep' ? 1.6 : b.kind === 'wall' ? 0.65 : 0.75) +
-          (enemy ? 0.35 : 0.1),
+          (b.kind === 'keep' ? 1.6 : b.kind === 'wall' ? 0.65 : 0.75) +
+            (enemy ? 0.35 : 0.1),
     );
   if (!blocked(nx, nz)) {
     u.x = nx;
@@ -770,7 +836,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
       }
       continue;
     }
-    move(p, input.x, input.z, 5.5, dt, w.terrain, w.buildings);
+    move(w, p, input.x, input.z, 5.5, dt);
     p.cool -= dt;
     p.lastHit += dt;
     if (p.lastHit > 4) p.hp = Math.min(p.maxHp, p.hp + dt * 4);
@@ -842,18 +908,18 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
         : n % 4 === 0
           ? 'runner'
           : 'crawler';
-    let spawnX = Math.round(Math.cos(angle) * 22),
-      spawnZ = Math.round(Math.sin(angle) * 22);
-    for (
-      let attempt = 0;
-      attempt < 30 &&
-      obs.some((o) => Math.hypot(o.x - spawnX, o.z - spawnZ) < o.r + 1.5);
-      attempt++
-    ) {
-      const a = angle + attempt * 0.3;
-      spawnX = Math.round(Math.cos(a) * 22);
-      spawnZ = Math.round(Math.sin(a) * 22);
-    }
+    let spawnX = 0,
+      spawnZ = 0,
+      found = false;
+    for (let ring = spawnRadius(w); ring >= 10 && !found; ring -= 4)
+      for (let attempt = 0; attempt < 40 && !found; attempt++) {
+        const a = angle + attempt * 0.31;
+        spawnX = Math.round(Math.cos(a) * ring);
+        spawnZ = Math.round(Math.sin(a) * ring);
+        found =
+          reachable(w, spawnX, spawnZ) &&
+          !obs.some((o) => Math.hypot(o.x - spawnX, o.z - spawnZ) < o.r + 1.2);
+      }
     const hp =
       (kind === 'boss'
         ? 450
@@ -891,7 +957,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     if (!['keep', 'tower', 'frost', 'ballista'].includes(b.kind) || b.cool > 0)
       continue;
     const range =
-      b.kind === 'keep'
+      (b.kind === 'keep'
         ? 5
         : b.kind === 'ballista'
           ? b.branch === 'heavy'
@@ -899,7 +965,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
             : 11
           : b.branch === 'heavy'
             ? 9
-            : 7;
+            : 7) * (terrain(w).cell(b.x, b.z) === 'hill' ? 1.2 : 1);
     const e = w.enemies
       .filter((e) => e.hp > 0 && dist(b, e) < range)
       .sort((a, c) => dist(b, a) - dist(b, c))[0];
@@ -952,13 +1018,12 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     if (dist(e, target) > attackRange) {
       const goal = waypoint(w, e, target);
       move(
+        w,
         e,
         goal.x - e.x,
         goal.z - e.z,
         e.speed * (e.slow > 0 ? 0.45 : 1),
         dt,
-        obs,
-        w.buildings,
         true,
       );
     } else if (e.cool <= 0) {
@@ -1003,6 +1068,10 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     return;
   }
   const before = w.buildings.length;
+  if (w.buildings.some((b) => b.hp <= 0 && b.kind === 'bridge')) {
+    w.terrainVersion++;
+    clearFields();
+  }
   w.buildings = w.buildings.filter((b) => b.hp > 0);
   if (w.buildings.length < before && workersUsed(w) > workerCap(w))
     w.notice = 'บ้านคนงานถูกทำลาย ป้อมทำงานช้าลงจนกว่าจะสร้างบ้านใหม่';

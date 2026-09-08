@@ -11,6 +11,7 @@ import {
   workerCap,
   workersUsed,
   income,
+  terrain,
 } from '../lib/game/engine.ts';
 const profile = {
   id: 'p1',
@@ -22,11 +23,26 @@ const profile = {
   best: 0,
 };
 const make = () => {
-  const w = newWorld('forest');
+  const w = newWorld('forest', 'TEST1');
   addPlayer(w, profile, 'bow');
   return w;
 };
 const give = (w, res) => Object.assign(w.res, res);
+// A buildable plain cell at roughly the given distance from the keep.
+const spotAt = (w, d) => {
+  const t = terrain(w);
+  for (let a = 0; a < Math.PI * 2; a += 0.1) {
+    const x = Math.round(Math.cos(a) * d),
+      z = Math.round(Math.sin(a) * d);
+    if (
+      t.cell(x, z) === 'plain' &&
+      !w.terrain.some((o) => Math.hypot(o.x - x, o.z - z) < 2.5) &&
+      !w.buildings.some((b) => Math.hypot(b.x - x, b.z - z) < 3)
+    )
+      return { x, z };
+  }
+  throw new Error('no spot at ' + d);
+};
 const build = (w, kind, x, z, seq = ++build.seq) =>
   command(w, 'p1', { type: 'build', seq, kind, x, z });
 build.seq = 100;
@@ -39,8 +55,9 @@ test('free placement enforces terrain, resources, tier, radius and phase rules',
   assert.equal(canBuild(w, 'tower', 4, 0), false);
   assert.match(build(w, 'frost', -4, 0), /ปลดล็อก/);
   assert.match(build(w, 'quarry', -4, 0), /ฐานแม่/);
-  assert.match(build(w, 'wall', 0, -14), /ไกลจากฐานแม่/);
-  assert.equal(canBuild(w, 'wall', 0, -14), false);
+  const far = spotAt(w, 15);
+  assert.match(build(w, 'wall', far.x, far.z), /ไกลจากฐานแม่/);
+  assert.equal(canBuild(w, 'wall', far.x, far.z), false);
   startWave(w);
   assert.notEqual(build(w, 'tower', -4, 0), '');
 });
@@ -97,7 +114,8 @@ test('keep level gates building tiers, upgrade levels and build radius', () => {
     '',
   );
   assert.equal(tower.level, 2);
-  assert.equal(build(w, 'wall', 0, -14), '');
+  const far = spotAt(w, 15);
+  assert.equal(build(w, 'wall', far.x, far.z), '');
   assert.match(build(w, 'mine', -4, 0), /ฐานแม่เป็นระดับ 3/);
 });
 test('quarries and mines must sit on matching resource nodes and replace them', () => {

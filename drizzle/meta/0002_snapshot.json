@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8f58fbdf-7c5c-48bd-943c-c9bead7479aa",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "bc96763d-a2de-4776-8afe-aab2687d9407",
+  "prevId": "f71c73a2-8c58-4e78-a9c6-4e0d4bfe936b",
   "tables": {
     "members": {
       "name": "members",
@@ -160,7 +160,13 @@
           "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_rewards_profile_claimed": {
+          "name": "idx_rewards_profile_claimed",
+          "columns": ["profile", "claimed"],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -197,6 +203,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -224,6 +238,73 @@
         "idx_rooms_status_updated": {
           "name": "idx_rooms_status_updated",
           "columns": ["status", "updated"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "seeds": {
+      "name": "seeds",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profile": {
+          "name": "profile",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "map": {
+          "name": "map",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "best": {
+          "name": "best",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created": {
+          "name": "created",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_seeds_profile_created": {
+          "name": "idx_seeds_profile_created",
+          "columns": ["profile", "created"],
           "isUnique": false
         }
       },

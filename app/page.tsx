@@ -19,6 +19,11 @@ import {
   LogOut,
   Radio,
   Shield,
+  Dices,
+  CalendarDays,
+  Bookmark,
+  Trash2,
+  Play,
 } from 'lucide-react';
 import {
   Dialog,
@@ -27,7 +32,12 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { api, type LobbyMember, type RoomSummary } from '@/lib/game/api';
+import {
+  api,
+  type LobbyMember,
+  type RoomSummary,
+  type SavedSeed,
+} from '@/lib/game/api';
 import {
   newWorld,
   addPlayer,
@@ -35,9 +45,12 @@ import {
   Profile,
   Weapon,
   MapId,
+  randomSeed,
+  normalizeSeed,
+  weeklySeed,
 } from '@/lib/game/engine';
 import Game, { Session } from './Game';
-type Room = { code: string; host: boolean; map: MapId };
+type Room = { code: string; host: boolean; map: MapId; seed: string };
 export default function Home() {
   const [weapon, setWeapon] = useState<Weapon>('bow'),
     [map, setMap] = useState<MapId>('forest'),
@@ -52,7 +65,9 @@ export default function Home() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [copied, setCopied] = useState(false),
-    [loadingRooms, setLoadingRooms] = useState(false);
+    [loadingRooms, setLoadingRooms] = useState(false),
+    [seed, setSeed] = useState(''),
+    [savedSeeds, setSavedSeeds] = useState<SavedSeed[]>([]);
   async function loadProfile() {
     try {
       const r = await api('profile');
@@ -66,6 +81,8 @@ export default function Home() {
   useEffect(() => {
     void loadProfile();
     const params = new URLSearchParams(window.location.search);
+    const fromUrl = normalizeSeed(params.get('seed') || '');
+    setSeed(fromUrl || randomSeed());
     const join = params.get('room');
     if (join && /^\d{6}$/.test(join)) {
       setCode(join);
@@ -115,6 +132,28 @@ export default function Home() {
       setLoadingRooms(false);
     }
   }
+  async function loadSeeds() {
+    try {
+      const r = await api('seeds');
+      setSavedSeeds(r.seeds);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  useEffect(() => {
+    if (modal === 'camp') void loadSeeds();
+  }, [modal]);
+  async function deleteSeed(id: string) {
+    setBusy(true);
+    try {
+      const r = await api('seed-delete', { id });
+      setSavedSeeds(r.seeds);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function saveName() {
     if (name.trim() && name !== profile?.name) {
       await api('name', { name: name.trim() });
@@ -123,7 +162,7 @@ export default function Home() {
   }
   function solo() {
     if (!profile) return;
-    const world = newWorld(map);
+    const world = newWorld(map, seed);
     addPlayer(world, profile, weapon);
     setSession({ world, profile, weapon });
   }
@@ -132,7 +171,7 @@ export default function Home() {
     setError('');
     try {
       await saveName();
-      const r = await api('create', { map, weapon });
+      const r = await api('create', { map, weapon, seed });
       setRoom(r);
       setMembers([]);
     } catch (e) {
@@ -169,7 +208,7 @@ export default function Home() {
     setBusy(true);
     try {
       const fresh = await api('lobby', { code: room.code });
-      const world = newWorld(room.map);
+      const world = newWorld(room.map, room.seed || fresh.seed);
       for (const p of fresh.players) addPlayer(world, p, p.weapon);
       await api('sync', {
         code: room.code,
@@ -383,6 +422,33 @@ export default function Home() {
               </button>
             ))}
           </div>
+          <div className="section-label">
+            <span>03 / SEED แผนที่</span>
+            <small>seed เดียวกัน = แผนที่เดียวกัน</small>
+          </div>
+          <div className="seed-row">
+            <input
+              aria-label="seed แผนที่"
+              value={seed}
+              maxLength={8}
+              onChange={(e) => setSeed(e.target.value.toUpperCase())}
+              onBlur={() => setSeed(normalizeSeed(seed) || randomSeed())}
+              spellCheck={false}
+            />
+            <button
+              className="secondary"
+              aria-label="สุ่ม seed"
+              onClick={() => setSeed(randomSeed())}
+            >
+              <Dices size={17} />
+            </button>
+            <button
+              className={'secondary' + (seed === weeklySeed() ? ' active' : '')}
+              onClick={() => setSeed(weeklySeed())}
+            >
+              <CalendarDays size={15} /> สัปดาห์นี้
+            </button>
+          </div>
           <button className="primary wide" disabled={!profile} onClick={solo}>
             {profile ? 'เริ่มผจญภัยคนเดียว' : 'กำลังเตรียมค่ายพัก…'}
             <ArrowRight size={19} />
@@ -425,7 +491,7 @@ export default function Home() {
           <DialogTitle>{room ? 'รวมพลผู้พิทักษ์' : 'ร่วมปกป้องเปลวไฟ'}</DialogTitle>
           <DialogDescription>
             {room
-              ? `${MAPS[room.map].name} · สูงสุด 4 คน`
+              ? `${MAPS[room.map].name} · SEED ${room.seed || '?'} · สูงสุด 4 คน`
               : 'สร้างห้อง ชวนด้วยเลข 6 หลัก หรือเข้าห้องที่ว่าง'}
           </DialogDescription>
           {room ? (
@@ -662,6 +728,49 @@ export default function Home() {
               );
             })}
           </div>
+          <div className="room-list-title">
+            <Bookmark size={15} /> SEED ที่บันทึกไว้
+          </div>
+          {savedSeeds.length === 0 ? (
+            <p className="room-empty">
+              ยังไม่มี seed ที่บันทึก
+              <small>บันทึกได้จากหน้าจบรอบ เมื่อชอบแผนที่นั้น</small>
+            </p>
+          ) : (
+            <div className="saved-seeds">
+              {savedSeeds.map((sd) => (
+                <div key={sd.id}>
+                  <span>
+                    <b>{sd.seed}</b>
+                    <small>
+                      {MAPS[sd.map].name}
+                      {sd.best ? ` · ดีที่สุด วันที่ ${sd.best}` : ''}
+                      {sd.name ? ` · ${sd.name}` : ''}
+                    </small>
+                  </span>
+                  <button
+                    className="primary"
+                    aria-label="เล่น seed นี้"
+                    onClick={() => {
+                      setMap(sd.map);
+                      setSeed(sd.seed);
+                      setModal('');
+                    }}
+                  >
+                    <Play size={15} />
+                  </button>
+                  <button
+                    className="secondary"
+                    aria-label="ลบ seed"
+                    disabled={busy}
+                    onClick={() => deleteSeed(sd.id)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <p className="footnote">
             แต้มคำนวณจาก Wave ที่ผ่าน ศัตรูที่กำจัด และเวลาต่อสู้
             <br />
