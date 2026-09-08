@@ -471,7 +471,13 @@ export class GameScene {
       const r = new T.Mesh(
         new T.DodecahedronGeometry(o.r),
         this.mat(
-          o.kind === 'ore' ? 0x6b5a4a : map === 'desert' ? 0x8b654d : 0x7e8b83,
+          o.kind === 'ore'
+            ? 0x5a5556
+            : o.kind === 'gold'
+              ? 0x7a6a4a
+              : map === 'desert'
+                ? 0x8b654d
+                : 0x7e8b83,
         ),
       );
       r.position.y = o.r * 0.45;
@@ -479,15 +485,15 @@ export class GameScene {
       r.rotation.set(0.2, o.x, 0.3);
       r.castShadow = true;
       g.add(r);
-      if (o.kind === 'ore') {
+      if (o.kind === 'ore' || o.kind === 'gold') {
         for (let j = 0; j < 3; j++) {
           const vein = new T.Mesh(
             new T.OctahedronGeometry(0.16),
             new T.MeshStandardMaterial({
-              color: 0xd9b25a,
-              emissive: 0x4a3a10,
-              roughness: 0.5,
-              metalness: 0.6,
+              color: o.kind === 'gold' ? 0xf1c454 : 0xb9c2cc,
+              emissive: o.kind === 'gold' ? 0x5a3f10 : 0x1a2230,
+              roughness: 0.4,
+              metalness: 0.7,
             }),
           );
           vein.position.set(
@@ -516,10 +522,25 @@ export class GameScene {
       if (o.kind === 'tree') {
         if (o.wood < g.userData.wood) g.userData.hitAt = now;
         g.userData.wood = o.wood;
-        const k = 0.6 + 0.4 * Math.min(1, o.wood / 30);
+        const k =
+          (o.young ? 0.25 : 0.6) +
+          (o.young ? 0.75 : 0.4) * Math.min(1, o.wood / 30);
         g.scale.set(k, k, k);
         const t = (now - (g.userData.hitAt ?? -9999)) / 320;
         g.rotation.z = t < 1 ? Math.sin(t * Math.PI * 3) * 0.12 * (1 - t) : 0;
+      } else if (o.kind === 'rock') {
+        if (o.stone < (g.userData.stone ?? o.stone)) g.userData.hitAt = now;
+        g.userData.stone = o.stone;
+        const k = 0.55 + 0.45 * Math.min(1, o.stone / 20);
+        g.scale.set(k, k, k);
+        const t = (now - (g.userData.hitAt ?? -9999)) / 220;
+        g.position.y =
+          this.y(o.x, o.z) + (t < 1 ? Math.sin(t * Math.PI) * 0.08 : 0);
+      } else {
+        // A mine built on this vein wraps it, so hide the bare vein mesh.
+        g.visible = !w.buildings.some(
+          (b) => b.hp > 0 && Math.hypot(b.x - o.x, b.z - o.z) < 1.05,
+        );
       }
     }
     for (const [id, g] of this.terrainMeshes)
@@ -662,7 +683,73 @@ export class GameScene {
       chimney.position.set(-0.6, 1.2, -0.4);
       chimney.name = 'chimney';
       g.add(chimney);
-    } else if (kind === 'quarry' || kind === 'goldmine' || kind === 'mine') {
+    } else if (kind === 'nursery') {
+      const bed = this.box(2.0, 0.16, 1.4, 0x5c4432);
+      bed.position.y = 0.08;
+      g.add(bed);
+      for (let i = 0; i < 6; i++) {
+        const pot = this.box(0.26, 0.2, 0.26, 0xa66a4a);
+        pot.position.set(
+          -0.75 + (i % 3) * 0.75,
+          0.26,
+          -0.35 + Math.floor(i / 3) * 0.7,
+        );
+        g.add(pot);
+        const sprout = new T.Mesh(
+          new T.ConeGeometry(0.12, 0.35, 5),
+          this.mat(0x6fbf6a),
+        );
+        sprout.position.set(pot.position.x, 0.55, pot.position.z);
+        sprout.name = 'crop';
+        g.add(sprout);
+      }
+      for (const x of [-1.0, 1.0]) {
+        const post = this.box(0.08, 1.0, 0.08, 0x8a6a48);
+        post.position.set(x, 0.5, -0.8);
+        g.add(post);
+      }
+      const beam = this.box(2.2, 0.08, 0.08, 0x8a6a48);
+      beam.position.set(0, 1.0, -0.8);
+      g.add(beam);
+      const cloth = this.box(2.2, 0.03, 1.2, 0xd9e4c4);
+      cloth.position.set(0, 1.02, -0.2);
+      cloth.rotation.x = 0.12;
+      g.add(cloth);
+      const can = this.box(0.2, 0.25, 0.2, 0x7f8f95);
+      can.position.set(1.15, 0.13, 0.55);
+      g.add(can);
+    } else if (kind === 'quarry') {
+      const base = this.box(1.6, 0.3, 1.4, 0x8d9294);
+      base.position.y = 0.15;
+      g.add(base);
+      const frame = this.box(0.12, 1.4, 0.12, 0x5d4733);
+      frame.position.set(-0.5, 0.95, 0);
+      g.add(frame);
+      const frame2 = this.box(0.12, 1.4, 0.12, 0x5d4733);
+      frame2.position.set(0.5, 0.95, 0);
+      g.add(frame2);
+      const beam = this.box(1.3, 0.12, 0.12, 0x5d4733);
+      beam.position.set(0, 1.6, 0);
+      g.add(beam);
+      const hammer = new T.Group();
+      hammer.name = 'hammer';
+      const handle = this.box(0.08, 1.0, 0.08, 0x8a6a48);
+      handle.position.y = -0.5;
+      hammer.add(handle);
+      const head = this.box(0.45, 0.3, 0.3, 0x4a4a48);
+      head.position.y = -1.0;
+      hammer.add(head);
+      hammer.position.set(0, 1.6, 0);
+      g.add(hammer);
+      for (let i = 0; i < 4; i++) {
+        const rubble = new T.Mesh(
+          new T.DodecahedronGeometry(0.16 + (i % 2) * 0.06),
+          this.mat(0x9aa19c),
+        );
+        rubble.position.set(-0.6 + i * 0.4, 0.38, 0.5);
+        g.add(rubble);
+      }
+    } else if (kind === 'goldmine' || kind === 'mine') {
       const base = new T.Mesh(
         new T.DodecahedronGeometry(1),
         this.mat(
@@ -1648,6 +1735,14 @@ export class GameScene {
       if (flag) flag.rotation.y = Math.sin(now * 0.004 + b.x) * 0.35;
       const cart = g.getObjectByName('cart');
       if (cart) cart.position.z = 0.9 + Math.sin(now * 0.0015 + b.z) * 0.55;
+      const hammer = g.getObjectByName('hammer');
+      if (hammer) {
+        const ft = (now - (d.fireAt ?? -9999)) / 400;
+        hammer.rotation.x =
+          ft < 1
+            ? -0.9 + Math.sin(ft * Math.PI) * 1.4
+            : -0.9 + Math.sin(now * 0.003) * 0.05;
+      }
       const turret = g.getObjectByName('turret');
       if (turret) {
         const e = w.enemies.length
@@ -1840,9 +1935,11 @@ export class GameScene {
             ? 0xf98977
             : e.kind === 'chop'
               ? 0xc9a36a
-              : e.kind === 'bolt'
-                ? 0xffffff
-                : 0xffdc8c;
+              : e.kind === 'mine'
+                ? 0xc7cfc9
+                : e.kind === 'bolt'
+                  ? 0xffffff
+                  : 0xffdc8c;
       const from = new T.Vector3(e.x, this.y(e.x, e.z) + 1, e.z),
         to = new T.Vector3(e.tx, this.y(e.tx, e.tz) + 1, e.tz);
       const t = 1 - Math.max(0, Math.min(1, e.life / 0.25));
@@ -1879,11 +1976,13 @@ export class GameScene {
         );
         this.effects.add(line);
       }
-      if (e.kind === 'chop') {
+      if (e.kind === 'chop' || e.kind === 'mine') {
         for (let i = 0; i < 3; i++) {
           const chip = new T.Mesh(
             new T.BoxGeometry(0.1, 0.06, 0.12),
-            new T.MeshBasicMaterial({ color: 0xd8b487 }),
+            new T.MeshBasicMaterial({
+              color: e.kind === 'mine' ? 0xb8bdb9 : 0xd8b487,
+            }),
           );
           const a = i * 2.1 + e.tx;
           chip.position.set(

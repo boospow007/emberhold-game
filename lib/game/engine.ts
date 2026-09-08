@@ -4,6 +4,7 @@ import {
   type MapId,
   type Obstacle,
   type ObstacleKind,
+  TREE_WOOD,
   terrainOf,
   generateObstacles,
   randomSeed,
@@ -36,7 +37,8 @@ export type BuildKind =
   | 'fisher'
   | 'barracks'
   | 'archery'
-  | 'stable';
+  | 'stable'
+  | 'nursery';
 export type UnitKind = 'infantry' | 'archer' | 'knight';
 export type Profile = {
   id: string;
@@ -69,7 +71,7 @@ export type Player = Unit & {
   lastHit: number;
   color: number;
   unlocks: string[];
-  task: '' | 'chop';
+  task: '' | 'chop' | 'mine';
   stack: number;
 };
 export type Enemy = Unit & {
@@ -265,31 +267,39 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     name: 'เหมืองทอง',
     cost: { wood: 40, stone: 20 },
     hp: 160,
-    desc: 'สร้างบนหิน • +20 ทองต่อระดับเมื่อจบวัน',
+    desc: 'สร้างบนสายแร่ทอง • +20 ทองต่อระดับเมื่อจบวัน ไม่มีวันหมด',
     tab: 'economy',
     tier: 2,
     workers: 1,
-    node: 'rock',
+    node: 'gold',
   },
   quarry: {
-    name: 'เหมืองหิน',
+    name: 'โรงเคาะหิน',
     cost: { wood: 40, gold: 30 },
     hp: 160,
-    desc: 'สร้างบนหิน • +12 หินต่อระดับเมื่อจบวัน',
+    desc: 'เคาะหินในรัศมี 6 ให้เอง +5 หินทุก 5 วินาทีต่อระดับ จนหินหมด',
     tab: 'economy',
     tier: 1,
     workers: 1,
-    node: 'rock',
   },
   mine: {
     name: 'เหมืองเหล็ก',
     cost: { stone: 40, gold: 50 },
     hp: 180,
-    desc: 'สร้างบนสายแร่ • +8 เหล็กต่อระดับเมื่อจบวัน',
+    desc: 'สร้างบนสายแร่เหล็ก • +8 เหล็กต่อระดับเมื่อจบวัน ไม่มีวันหมด',
     tab: 'economy',
     tier: 2,
     workers: 2,
     node: 'ore',
+  },
+  nursery: {
+    name: 'โรงเพาะกล้า',
+    cost: { wood: 30, gold: 20 },
+    hp: 120,
+    desc: 'ปลูกต้นกล้าในรัศมี 5 ทุก 20 วินาทีต่อระดับ ต้นไม้โตเต็มใน 30 วินาที',
+    tab: 'economy',
+    tier: 1,
+    workers: 0,
   },
   tower: {
     name: 'ป้อมธนู',
@@ -677,7 +687,7 @@ export function buildError(
   const water = waterError(w, kind, x, z);
   if (water) return water;
   if (d.node && !nodeAt(w, kind, x, z))
-    return d.node === 'ore' ? 'ต้องวางบนสายแร่' : 'ต้องวางบนหิน';
+    return d.node === 'ore' ? 'ต้องวางบนสายแร่เหล็ก' : 'ต้องวางบนสายแร่ทอง';
   if (!canBuild(w, kind, x, z)) return 'พื้นที่นี้วางไม่ได้';
   if (w.buildings.length >= 90) return 'ฐานมีสิ่งก่อสร้างเต็มแล้ว';
   return '';
@@ -759,11 +769,9 @@ export function command(w: World, pid: string, c: Command): string {
     if (err) return err;
     const node = nodeAt(w, k, x, z);
     if (node) {
+      // Mines sit on their vein; the vein stays so the mine can be rebuilt.
       x = node.x;
       z = node.z;
-      w.terrain = w.terrain.filter((o) => o !== node);
-      w.terrainVersion++;
-      clearFields();
     }
     pay(w, d.cost);
     if (k === 'bridge') {
@@ -830,7 +838,6 @@ export function income(w: World): Cost {
     if (b.kind === 'farm') out.food = (out.food || 0) + 10 * b.level;
     else if (b.kind === 'fisher') out.food = (out.food || 0) + 8 * b.level;
     else if (b.kind === 'goldmine') out.gold = (out.gold || 0) + 20 * b.level;
-    else if (b.kind === 'quarry') out.stone = (out.stone || 0) + 12 * b.level;
     else if (b.kind === 'mine') out.iron = (out.iron || 0) + 8 * b.level;
   }
   return out;
@@ -1015,31 +1022,93 @@ function levelUp(p: Player, xp: number) {
 }
 export const SAWMILL_PERIOD = 5;
 export const SAWMILL_YIELD = 5;
-// Sawmills fell the nearest tree in range on a fixed cadence until the
-// forest around them is gone, so waiting in prep never gives infinite wood.
-function stepSawmills(w: World, dt: number) {
-  for (const b of w.buildings) {
-    if (b.kind !== 'sawmill') continue;
-    b.cool -= dt;
-    if (b.cool > 0) continue;
-    const tree = w.terrain
-      .filter((o) => o.kind === 'tree' && o.wood > 0 && dist(o, b) < 6)
-      .sort((a, c) => dist(a, b) - dist(c, b))[0];
-    if (!tree) {
-      b.cool = 1;
-      continue;
-    }
-    b.cool = SAWMILL_PERIOD;
-    const got = Math.min(SAWMILL_YIELD * b.level, tree.wood);
-    tree.wood -= got;
+export const NURSERY_PERIOD = 20;
+export const SAPLING_GROWTH = 1; // wood per second until TREE_WOOD
+function removeObstacle(w: World, o: Obstacle) {
+  w.terrain = w.terrain.filter((x) => x !== o);
+  w.terrainVersion++;
+  clearFields();
+}
+function takeFrom(w: World, o: Obstacle, amount: number) {
+  if (o.kind === 'tree') {
+    const got = Math.min(amount, o.wood);
+    o.wood -= got;
     w.res.wood += got;
-    emit(w, b, tree, 'chop');
-    if (tree.wood <= 0) {
-      w.terrain = w.terrain.filter((o) => o !== tree);
-      w.terrainVersion++;
-      clearFields();
+    if (o.wood <= 0 && !o.young) removeObstacle(w, o);
+    else if (o.wood <= 0) removeObstacle(w, o);
+    return got;
+  }
+  const got = Math.min(amount, o.stone);
+  o.stone -= got;
+  w.res.stone += got;
+  if (o.stone <= 0) removeObstacle(w, o);
+  return got;
+}
+// Sawmills fell trees and quarries break rocks in range on a fixed cadence
+// until the patch is exhausted; nurseries plant saplings that grow back.
+function stepHarvesters(w: World, dt: number) {
+  for (const b of w.buildings) {
+    if (b.kind === 'sawmill' || b.kind === 'quarry') {
+      b.cool -= dt;
+      if (b.cool > 0) continue;
+      const want = b.kind === 'sawmill' ? 'tree' : 'rock';
+      const target = w.terrain
+        .filter(
+          (o) =>
+            o.kind === want &&
+            (want === 'tree' ? o.wood > 0 && !o.young : o.stone > 0) &&
+            dist(o, b) < 6,
+        )
+        .sort((a, c) => dist(a, b) - dist(c, b))[0];
+      if (!target) {
+        b.cool = 1;
+        continue;
+      }
+      b.cool = SAWMILL_PERIOD;
+      takeFrom(w, target, SAWMILL_YIELD * b.level);
+      emit(w, b, target, want === 'tree' ? 'chop' : 'mine');
+    } else if (b.kind === 'nursery') {
+      b.cool -= dt;
+      if (b.cool > 0) continue;
+      b.cool = NURSERY_PERIOD / b.level;
+      const nearby = w.terrain.filter((o) => dist(o, b) < 5).length;
+      if (nearby >= 8) continue;
+      const t = terrain(w);
+      let planted = false;
+      for (let i = 0; i < 24 && !planted; i++) {
+        const a = (i * 2.399963 + w.serial) % (Math.PI * 2),
+          d = 2 + (i % 3);
+        const x = Math.round(b.x + Math.cos(a) * d),
+          z = Math.round(b.z + Math.sin(a) * d);
+        if (
+          !t.land(x, z) ||
+          w.terrain.some((o) => dist(o, { x, z }) < 2.2) ||
+          w.buildings.some(
+            (q) => dist(q, { x, z }) < (q.kind === 'keep' ? 3 : 1.9),
+          )
+        )
+          continue;
+        w.terrain.push({
+          id: ++w.serial,
+          x,
+          z,
+          r: 0.7,
+          kind: 'tree',
+          wood: 2,
+          stone: 0,
+          young: true,
+        });
+        w.terrainVersion++;
+        clearFields();
+        planted = true;
+      }
     }
   }
+  for (const o of w.terrain)
+    if (o.young) {
+      o.wood = Math.min(TREE_WOOD, o.wood + SAPLING_GROWTH * dt);
+      if (o.wood >= TREE_WOOD) o.young = false;
+    }
 }
 function stepUnits(w: World, dt: number) {
   for (const u of w.units) {
@@ -1144,27 +1213,26 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
       }
       continue;
     }
-    const tree = w.terrain.find(
-      (o) => o.kind === 'tree' && dist(o, p) < o.r + 1.1,
-    );
-    p.task = tree ? 'chop' : '';
-    if (tree && p.cool <= 0) {
-      p.cool = 0.9 / p.haste;
-      p.angle = Math.atan2(tree.x - p.x, tree.z - p.z);
-      const got = Math.min(5, tree.wood);
-      tree.wood -= got;
-      w.res.wood += got;
-      emit(w, p, tree, 'chop');
-      if (tree.wood <= 0) {
-        w.terrain = w.terrain.filter((o) => o !== tree);
-        w.terrainVersion++;
-        clearFields();
-        p.task = '';
-      }
+    // Heroes gather by hand: grown trees give wood, plain rocks give stone.
+    // Ore and gold veins need a mine.
+    const target = w.terrain
+      .filter(
+        (o) =>
+          ((o.kind === 'tree' && !o.young) || o.kind === 'rock') &&
+          dist(o, p) < o.r + 1.1,
+      )
+      .sort((a, b) => dist(a, p) - dist(b, p))[0];
+    p.task = target ? (target.kind === 'tree' ? 'chop' : 'mine') : '';
+    if (target && p.cool <= 0) {
+      p.cool = (target.kind === 'tree' ? 0.9 : 1.1) / p.haste;
+      p.angle = Math.atan2(target.x - p.x, target.z - p.z);
+      takeFrom(w, target, target.kind === 'tree' ? 5 : 4);
+      emit(w, p, target, target.kind === 'tree' ? 'chop' : 'mine');
+      if (!w.terrain.includes(target)) p.task = '';
     }
   }
   stepUnits(w, dt);
-  stepSawmills(w, dt);
+  stepHarvesters(w, dt);
   if (w.phase === 'prep') {
     w.timer += dt;
     return;

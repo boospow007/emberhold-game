@@ -36,6 +36,7 @@ import {
   Footprints,
   RotateCcw,
   RotateCw,
+  Sprout,
 } from 'lucide-react';
 import { Dialog, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -109,6 +110,7 @@ const BUILD_ICON: Record<BuildKind, typeof Coins> = {
   barracks: Tent,
   archery: Target,
   stable: Flag,
+  nursery: Sprout,
 };
 function CostChips({
   cost,
@@ -692,6 +694,10 @@ export default function Game({
                 {me?.task === 'chop' ? (
                   <em className="chopping">
                     <Axe size={11} /> กำลังตัดไม้
+                  </em>
+                ) : me?.task === 'mine' ? (
+                  <em className="chopping">
+                    <Pickaxe size={11} /> กำลังเคาะหิน
                   </em>
                 ) : me?.weapon === 'bow' ? (
                   'ธนู'

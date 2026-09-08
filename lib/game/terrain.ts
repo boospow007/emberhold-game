@@ -2,7 +2,7 @@
 // Heights are never serialized: every client regenerates them from
 // (seed, map) and caches the result, so co-op snapshots stay small.
 export type MapId = 'forest' | 'desert' | 'snow';
-export type ObstacleKind = 'tree' | 'rock' | 'ore';
+export type ObstacleKind = 'tree' | 'rock' | 'ore' | 'gold';
 export type Obstacle = {
   id: number;
   x: number;
@@ -10,7 +10,11 @@ export type Obstacle = {
   r: number;
   kind: ObstacleKind;
   wood: number;
+  stone: number;
+  young?: boolean;
 };
+export const TREE_WOOD = 30;
+export const ROCK_STONE = 20;
 export type CellKind = 'water' | 'plain' | 'hill' | 'mountain';
 export const HALF = 56;
 export const SIZE = HALF * 2 + 1;
@@ -288,11 +292,19 @@ export function generateObstacles(seed: string, map: MapId): Obstacle[] {
     const roll = r();
     let kind: ObstacleKind | null = null;
     if (map === 'desert') {
-      if (c === 'hill' && roll < 0.7) kind = roll < 0.25 ? 'ore' : 'rock';
+      if (c === 'hill' && roll < 0.7)
+        kind = roll < 0.13 ? 'ore' : roll < 0.25 ? 'gold' : 'rock';
       else if (roll < 0.22) kind = 'tree';
       else if (roll < 0.4) kind = 'rock';
     } else if (c === 'hill') {
-      kind = roll < 0.3 ? 'ore' : roll < 0.75 ? 'rock' : 'tree';
+      kind =
+        roll < 0.16
+          ? 'ore'
+          : roll < 0.3
+            ? 'gold'
+            : roll < 0.75
+              ? 'rock'
+              : 'tree';
     } else if (f > 0.5 && roll < 0.85) kind = 'tree';
     else if (roll < 0.12) kind = 'rock';
     if (!kind) continue;
@@ -303,7 +315,8 @@ export function generateObstacles(seed: string, map: MapId): Obstacle[] {
       z,
       r: 0.65 + r() * 0.5,
       kind,
-      wood: kind === 'tree' ? 30 : 0,
+      wood: kind === 'tree' ? TREE_WOOD : 0,
+      stone: kind === 'rock' ? ROCK_STONE : 0,
     };
     out.push(o);
     const key = Math.floor(x / 4) * 1000 + Math.floor(z / 4);
@@ -334,6 +347,7 @@ export function generateObstacles(seed: string, map: MapId): Obstacle[] {
         r: 0.75 + r() * 0.3,
         kind,
         wood: 0,
+        stone: kind === 'rock' ? ROCK_STONE : 0,
       };
       out.push(o);
       const key = Math.floor(x / 4) * 1000 + Math.floor(z / 4);
@@ -342,7 +356,8 @@ export function generateObstacles(seed: string, map: MapId): Obstacle[] {
       have++;
     }
   };
-  guarantee('rock', 2, 8, 11);
-  guarantee('ore', 1, 9, 12);
+  guarantee('rock', 3, 8, 11);
+  guarantee('ore', 1, 8, 11);
+  guarantee('gold', 1, 8, 11);
   return out;
 }
