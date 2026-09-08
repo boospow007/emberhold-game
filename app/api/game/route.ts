@@ -4,6 +4,7 @@ import {
   normalizeSeed,
   MAX_SQUAD,
   squadCost,
+  LENGTHS,
   type World,
   type Profile,
   type MapId,
@@ -15,6 +16,7 @@ type DbRoom = {
   host: string;
   map: MapId;
   seed: string;
+  days: number;
   updated: number;
   snapshot: string | null;
   status: string;
@@ -30,6 +32,7 @@ type Payload = {
   run: string;
   seed: string;
   id: string;
+  days: number;
   points: number;
   wave: number;
   input: Input;
@@ -209,10 +212,16 @@ export async function POST(req: Request) {
     if (b.action === 'list') {
       const rooms = await db
         .prepare(
-          "SELECT r.code,r.name,r.map,(SELECT COUNT(*) FROM members m WHERE m.room=r.code AND m.updated>?) AS count FROM rooms r WHERE r.status='lobby' AND r.updated>? ORDER BY r.updated DESC LIMIT 25",
+          "SELECT r.code,r.name,r.map,r.days,(SELECT COUNT(*) FROM members m WHERE m.room=r.code AND m.updated>?) AS count FROM rooms r WHERE r.status='lobby' AND r.updated>? ORDER BY r.updated DESC LIMIT 25",
         )
         .bind(now - 45000, now - 45000)
-        .all<{ code: string; name: string; map: MapId; count: number }>();
+        .all<{
+          code: string;
+          name: string;
+          map: MapId;
+          days: number;
+          count: number;
+        }>();
       return result({ rooms: rooms.results.filter((r) => r.count < 4) });
     }
     if (b.action === 'create') {
@@ -229,6 +238,7 @@ export async function POST(req: Request) {
         db.prepare('DELETE FROM members WHERE updated<?').bind(now - 86400000),
       ]);
       const seed = normalizeSeed(b.seed || '');
+      const days = LENGTHS.includes(Number(b.days)) ? Number(b.days) : 0;
       let code = '';
       for (let i = 0; i < 5; i++) {
         code = String(
@@ -236,9 +246,9 @@ export async function POST(req: Request) {
         );
         const r = await db
           .prepare(
-            'INSERT OR IGNORE INTO rooms(code,host,name,map,seed,updated) VALUES(?,?,?,?,?,?)',
+            'INSERT OR IGNORE INTO rooms(code,host,name,map,seed,days,updated) VALUES(?,?,?,?,?,?,?)',
           )
-          .bind(code, id, profile.name, b.map, seed, now)
+          .bind(code, id, profile.name, b.map, seed, days, now)
           .run();
         if (r.meta.changes) break;
         code = '';
@@ -248,7 +258,7 @@ export async function POST(req: Request) {
         .prepare('INSERT INTO members(id,room,weapon,updated) VALUES(?,?,?,?)')
         .bind(id, code, b.weapon, now)
         .run();
-      return result({ code, host: true, map: b.map, seed });
+      return result({ code, host: true, map: b.map, seed, days });
     }
     if (b.action === 'join') {
       if (
@@ -276,6 +286,7 @@ export async function POST(req: Request) {
         host: room.host === id,
         map: room.map,
         seed: room.seed || '',
+        days: room.days || 0,
       });
     }
     if (b.action === 'solo-reward') {
@@ -446,6 +457,7 @@ export async function POST(req: Request) {
         status: room.status,
         map: room.map,
         seed: room.seed || '',
+        days: room.days || 0,
         players: players.results.map((p) => ({
           ...profileRow(p),
           weapon: p.weapon,

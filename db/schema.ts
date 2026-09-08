@@ -17,6 +17,7 @@ export const rooms = sqliteTable(
     name: text('name').notNull(),
     map: text('map').notNull(),
     seed: text('seed').notNull().default(''),
+    days: integer('days').notNull().default(0),
     status: text('status').notNull().default('lobby'),
     snapshot: text('snapshot'),
     updated: integer('updated').notNull(),

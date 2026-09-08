@@ -65,6 +65,8 @@ import {
   command,
   dist,
   reward,
+  daysSurvived,
+  LENGTH_BONUS,
   workerCap,
   workersUsed,
   upgradeCost,
@@ -140,10 +142,12 @@ export default function Game({
   session,
   onExit,
   onProfile,
+  onSave,
 }: {
   session: Session;
   onExit: () => void;
   onProfile: (p: Profile) => void;
+  onSave?: (world: World | null, weapon: Weapon) => void;
 }) {
   const mount = useRef<HTMLDivElement>(null),
     world = useRef(session.world),
@@ -354,7 +358,7 @@ export default function Game({
         const r = await api('solo-reward', {
           run: w.run,
           points: reward(w),
-          wave: Math.max(0, w.wave - 1),
+          wave: daysSurvived(w),
         });
         onProfile(r.profile);
       }
@@ -374,6 +378,19 @@ export default function Game({
       void saveResult();
     }
   }, [hud.phase, saveResult, openPanel]);
+  // Solo runs autosave whenever a day ends (state is quiet in prep) and clear on game over.
+  const lastSavedWave = useRef(-1);
+  useEffect(() => {
+    if (session.room || !onSave) return;
+    if (hud.phase === 'over') {
+      onSave(null, session.weapon);
+      return;
+    }
+    if (hud.phase === 'prep' && hud.wave !== lastSavedWave.current) {
+      lastSavedWave.current = hud.wave;
+      onSave(world.current, session.weapon);
+    }
+  }, [hud.phase, hud.wave, session.room, session.weapon, onSave]);
   const me = hud.players.find((p) => p.id === id),
     keep = hud.buildings[0],
     nearest = me
@@ -499,12 +516,16 @@ export default function Game({
                 '0',
               )}
             </b>
+            {hud.days > 0 && <small className="day-total">/ {hud.days}</small>}
           </strong>
           <span>
             {hud.phase === 'prep'
-              ? host
-                ? 'เตรียมฐาน · กดเริ่มวันเมื่อพร้อม'
-                : 'เตรียมฐาน · รอเจ้าของห้องเริ่มวัน'
+              ? (hud.days > 0 && hud.wave + 1 === hud.days
+                  ? 'คืนสุดท้าย · '
+                  : (hud.wave + 1) % 10 === 0
+                    ? 'Boss Wave · '
+                    : 'เตรียมฐาน · ') +
+                (host ? 'กดเริ่มวันเมื่อพร้อม' : 'รอเจ้าของห้องเริ่มวัน')
               : `เหลือศัตรู ${aliveEnemies} · ${time}`}
           </span>
         </div>
@@ -1024,15 +1045,19 @@ export default function Game({
           <span className="result-icon">
             <Flame size={36} />
           </span>
-          <span className="eyebrow gold">EVERY END IS A BEGINNING</span>
-          <DialogTitle>เปลวไฟดับลง</DialogTitle>
+          <span className="eyebrow gold">
+            {hud.won ? 'DAWN HAS COME' : 'EVERY END IS A BEGINNING'}
+          </span>
+          <DialogTitle>{hud.won ? 'อาณาจักรรอดแล้ว!' : 'เปลวไฟดับลง'}</DialogTitle>
           <DialogDescription>
-            พักสักครู่ แล้วกลับมาสร้างให้แข็งแกร่งกว่าเดิม
+            {hud.won
+              ? `ยืนหยัดครบ ${hud.days} วัน โบนัส +${LENGTH_BONUS[hud.days] || 0} แต้ม`
+              : 'พักสักครู่ แล้วกลับมาสร้างให้แข็งแกร่งกว่าเดิม'}
           </DialogDescription>
           <div className="results-grid">
             <span>
-              <b>{Math.max(0, hud.wave - 1)}</b>
-              <small>Wave ที่ผ่าน</small>
+              <b>{daysSurvived(hud)}</b>
+              <small>วันที่รอด{hud.days ? ` / ${hud.days}` : ''}</small>
             </span>
             <span>
               <b>{time}</b>
@@ -1054,7 +1079,7 @@ export default function Game({
                 await api('seed-save', {
                   seed: hud.seed,
                   map: hud.map,
-                  wave: Math.max(0, hud.wave - 1),
+                  wave: daysSurvived(hud),
                 });
                 setSeedSaved(true);
                 setToast('บันทึก seed แล้ว เล่นซ้ำได้จากค่ายพัก');

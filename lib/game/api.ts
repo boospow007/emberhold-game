@@ -4,11 +4,13 @@ export type RoomInfo = {
   host: boolean;
   map: MapId;
   seed: string;
+  days: number;
 };
 export type RoomSummary = {
   code: string;
   name: string;
   map: MapId;
+  days: number;
   count: number;
 };
 export type SavedSeed = {
@@ -36,6 +38,7 @@ type Results = {
     status: string;
     map: MapId;
     seed: string;
+    days: number;
     players: LobbyMember[];
     snapshot: World | null;
   };

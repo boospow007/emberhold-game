@@ -1,0 +1,1 @@
+ALTER TABLE `rooms` ADD `days` integer DEFAULT 0 NOT NULL;

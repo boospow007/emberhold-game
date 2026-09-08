@@ -511,6 +511,58 @@ input {
   background: #30413e !important;
   color: #f2c36d !important;
 }
+.length-row {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.length-row button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 4px;
+  border-radius: 10px;
+  border: 1px solid #ffffff16;
+  background: #ffffff05;
+  font-size: 15px;
+  color: #edf0e5;
+}
+.length-row button small {
+  font-size: 9px;
+  color: var(--muted-foreground);
+}
+.length-row button.selected {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: #f2c36d12;
+}
+.resume-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  border: 1px solid #f2c36d55;
+  background: #f2c36d0f;
+}
+.resume-card > span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.resume-card small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.resume-card button {
+  padding: 8px 12px;
+  white-space: nowrap;
+}
 .seed-row {
   display: flex;
   gap: 8px;
@@ -855,6 +907,11 @@ input {
   letter-spacing: 0;
   margin-left: 5px;
   color: #fff5d9;
+}
+.day-total {
+  font-size: 13px;
+  color: #b8c9b5;
+  margin-left: 4px;
 }
 .wave-label > span:last-child {
   font-size: 12px;

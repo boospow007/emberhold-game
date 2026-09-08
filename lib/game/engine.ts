@@ -116,6 +116,8 @@ export type World = {
   run: string;
   map: MapId;
   seed: string;
+  days: number;
+  won: boolean;
   phase: 'prep' | 'battle' | 'over';
   wave: number;
   timer: number;
@@ -385,6 +387,17 @@ export const BUILDINGS: Record<BuildKind, BuildInfo> = {
     unit: 'knight',
   },
 };
+export const LENGTHS = [30, 80, 100, 120, 150, 0];
+export const LENGTH_BONUS: Record<number, number> = {
+  30: 40,
+  80: 80,
+  100: 120,
+  120: 180,
+  150: 250,
+};
+export const isFinal = (w: World) => w.days > 0 && w.wave >= w.days;
+export const bossCount = (w: World) =>
+  isFinal(w) ? 4 : w.wave % 10 === 0 ? 3 : w.wave % 5 === 0 ? 1 : 0;
 export const BASE_STACK = 2;
 export const MAX_SQUAD = 8;
 export const squadCost = (level: number) => 80 + level * 60;
@@ -483,12 +496,14 @@ export function nodeAt(w: World, kind: BuildKind, x: number, z: number) {
     w.terrain.find((o) => o.kind === need && dist(o, { x, z }) < 1.2) || null
   );
 }
-export function newWorld(map: MapId, seed?: string): World {
+export function newWorld(map: MapId, seed?: string, days = 0): World {
   const s = normalizeSeed(seed || '') || randomSeed();
   return {
     run: crypto.randomUUID(),
     map,
     seed: s,
+    days: LENGTHS.includes(days) ? days : 0,
+    won: false,
     phase: 'prep',
     wave: 0,
     timer: 0,
@@ -768,10 +783,18 @@ export function startWave(w: World) {
   w.phase = 'battle';
   w.wave++;
   w.timer = 0;
-  w.left = Math.round((9 + w.wave * 5) * (1 + 0.45 * (w.players.length - 1)));
+  const mult = isFinal(w) ? 2 : w.wave % 10 === 0 ? 1.3 : 1;
+  w.left = Math.round(
+    (9 + w.wave * 5) * (1 + 0.45 * (w.players.length - 1)) * mult,
+  );
   w.spawn = 0.2;
-  w.notice =
-    w.wave % 5 === 0 ? 'ระวัง! ผู้ทำลายฐานกำลังมา' : 'ศัตรูกำลังบุก ปกป้องเปลวไฟ!';
+  w.notice = isFinal(w)
+    ? 'คืนสุดท้าย! ศัตรูทั้งหมดบุกพร้อมกัน ยืนหยัดให้ถึงรุ่งเช้า'
+    : w.wave % 10 === 0
+      ? 'Boss Wave! ผู้ทำลายฐานหลายตนกำลังมา'
+      : w.wave % 5 === 0
+        ? 'ระวัง! ผู้ทำลายฐานกำลังมา'
+        : 'ศัตรูกำลังบุก ปกป้องเปลวไฟ!';
 }
 export function income(w: World): Cost {
   const out: Cost = { gold: 20 };
@@ -1102,7 +1125,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     w.spawn = Math.max(0.18, 0.75 - w.wave * 0.025);
     const n = ++w.serial;
     const angle = (n * 2.399963 + w.wave * 0.7) % (Math.PI * 2);
-    const boss = w.wave % 5 === 0 && w.left === 1;
+    const boss = w.left <= bossCount(w);
     const kind = boss
       ? 'boss'
       : n % 6 === 0
@@ -1285,6 +1308,12 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
   if (w.buildings.length < before && workersUsed(w) > workerCap(w))
     w.notice = 'บ้านคนงานถูกทำลาย ป้อมทำงานช้าลงจนกว่าจะสร้างบ้านใหม่';
   if (w.left === 0 && w.enemies.length === 0) {
+    if (isFinal(w)) {
+      w.phase = 'over';
+      w.won = true;
+      w.notice = `รุ่งเช้ามาถึง! ยืนหยัดครบ ${w.days} วัน อาณาจักรรอดแล้ว`;
+      return;
+    }
     w.phase = 'prep';
     w.timer = 0;
     const gain = income(w);
@@ -1309,11 +1338,14 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     w.notice = 'รอดแล้ว! +' + costText(gain) + ' · ซ่อมฐานและเลือกพร';
   }
 }
+export const daysSurvived = (w: World) =>
+  w.won ? w.wave : Math.max(0, w.wave - (w.phase === 'prep' ? 0 : 1));
 export function reward(w: World) {
   return Math.max(
     0,
-    (w.wave - (w.phase === 'battle' || w.phase === 'over' ? 1 : 0)) * 12 +
+    daysSurvived(w) * 12 +
       Math.floor(w.kills / 5) +
-      Math.floor(w.elapsed / 60) * 2,
+      Math.floor(w.elapsed / 60) * 2 +
+      (w.won ? LENGTH_BONUS[w.days] || 0 : 0),
   );
 }

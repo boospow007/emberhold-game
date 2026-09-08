@@ -51,9 +51,20 @@ import {
   squadCost,
   MAX_SQUAD,
   BASE_STACK,
+  LENGTHS,
+  type World,
 } from '@/lib/game/engine';
 import Game, { Session } from './Game';
-type Room = { code: string; host: boolean; map: MapId; seed: string };
+type Room = {
+  code: string;
+  host: boolean;
+  map: MapId;
+  seed: string;
+  days: number;
+};
+type SaveSlot = { world: World; weapon: Weapon; savedAt: number };
+export const saveKey = (profileId: string) => 'emberhold:save:' + profileId;
+export const lengthLabel = (d: number) => (d ? `${d} วัน` : 'ไม่จำกัด');
 export default function Home() {
   const [weapon, setWeapon] = useState<Weapon>('bow'),
     [map, setMap] = useState<MapId>('forest'),
@@ -70,12 +81,31 @@ export default function Home() {
     [copied, setCopied] = useState(false),
     [loadingRooms, setLoadingRooms] = useState(false),
     [seed, setSeed] = useState(''),
+    [days, setDays] = useState(80),
+    [save, setSave] = useState<SaveSlot | null>(null),
     [savedSeeds, setSavedSeeds] = useState<SavedSeed[]>([]);
+  function loadSave(profileId: string) {
+    try {
+      const raw = localStorage.getItem(saveKey(profileId));
+      const slot = raw ? (JSON.parse(raw) as SaveSlot) : null;
+      setSave(
+        slot &&
+          slot.world &&
+          slot.world.phase !== 'over' &&
+          slot.world.players?.some((p) => p.id === profileId)
+          ? slot
+          : null,
+      );
+    } catch {
+      setSave(null);
+    }
+  }
   async function loadProfile() {
     try {
       const r = await api('profile');
       setProfile(r.profile);
       setName(r.profile.name);
+      loadSave(r.profile.id);
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -165,16 +195,27 @@ export default function Home() {
   }
   function solo() {
     if (!profile) return;
-    const world = newWorld(map, seed);
+    const world = newWorld(map, seed, days);
     addPlayer(world, profile, weapon);
     setSession({ world, profile, weapon });
+  }
+  function resume() {
+    if (!profile || !save) return;
+    setSession({ world: save.world, profile, weapon: save.weapon });
+  }
+  function discardSave() {
+    if (!profile) return;
+    try {
+      localStorage.removeItem(saveKey(profile.id));
+    } catch {}
+    setSave(null);
   }
   async function create() {
     setBusy(true);
     setError('');
     try {
       await saveName();
-      const r = await api('create', { map, weapon, seed });
+      const r = await api('create', { map, weapon, seed, days });
       setRoom(r);
       setMembers([]);
     } catch (e) {
@@ -211,7 +252,11 @@ export default function Home() {
     setBusy(true);
     try {
       const fresh = await api('lobby', { code: room.code });
-      const world = newWorld(room.map, room.seed || fresh.seed);
+      const world = newWorld(
+        room.map,
+        room.seed || fresh.seed,
+        room.days ?? fresh.days,
+      );
       for (const p of fresh.players) addPlayer(world, p, p.weapon);
       await api('sync', {
         code: room.code,
@@ -316,6 +361,15 @@ export default function Home() {
           setMembers([]);
           setModal('');
           void loadProfile();
+        }}
+        onSave={(world, weapon) => {
+          if (!profile) return;
+          try {
+            if (world) {
+              const slot: SaveSlot = { world, weapon, savedAt: Date.now() };
+              localStorage.setItem(saveKey(profile.id), JSON.stringify(slot));
+            } else localStorage.removeItem(saveKey(profile.id));
+          } catch {}
         }}
       />
     );
@@ -426,7 +480,24 @@ export default function Home() {
             ))}
           </div>
           <div className="section-label">
-            <span>03 / SEED แผนที่</span>
+            <span>03 / ความยาว</span>
+            <small>1 วัน = 1 wave กดเริ่มเอง</small>
+          </div>
+          <div className="length-row" aria-label="ความยาวเกม">
+            {LENGTHS.map((d) => (
+              <button
+                key={d}
+                aria-pressed={days === d}
+                className={days === d ? 'selected' : ''}
+                onClick={() => setDays(d)}
+              >
+                {d ? d : '∞'}
+                <small>{d ? 'วัน' : 'ไม่จำกัด'}</small>
+              </button>
+            ))}
+          </div>
+          <div className="section-label">
+            <span>04 / SEED แผนที่</span>
             <small>seed เดียวกัน = แผนที่เดียวกัน</small>
           </div>
           <div className="seed-row">
@@ -452,6 +523,28 @@ export default function Home() {
               <CalendarDays size={15} /> สัปดาห์นี้
             </button>
           </div>
+          {save && (
+            <div className="resume-card">
+              <span>
+                <b>เล่นต่อจากที่ค้างไว้</b>
+                <small>
+                  {MAPS[save.world.map].name} · SEED {save.world.seed} · วันที่{' '}
+                  {save.world.wave + 1}
+                  {save.world.days ? ` / ${save.world.days}` : ''}
+                </small>
+              </span>
+              <button className="primary" onClick={resume}>
+                <Play size={15} /> เล่นต่อ
+              </button>
+              <button
+                className="secondary"
+                aria-label="ลบเซฟ"
+                onClick={discardSave}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          )}
           <button className="primary wide" disabled={!profile} onClick={solo}>
             {profile ? 'เริ่มผจญภัยคนเดียว' : 'กำลังเตรียมค่ายพัก…'}
             <ArrowRight size={19} />
@@ -494,7 +587,7 @@ export default function Home() {
           <DialogTitle>{room ? 'รวมพลผู้พิทักษ์' : 'ร่วมปกป้องเปลวไฟ'}</DialogTitle>
           <DialogDescription>
             {room
-              ? `${MAPS[room.map].name} · SEED ${room.seed || '?'} · สูงสุด 4 คน`
+              ? `${MAPS[room.map].name} · ${lengthLabel(room.days)} · SEED ${room.seed || '?'} · สูงสุด 4 คน`
               : 'สร้างห้อง ชวนด้วยเลข 6 หลัก หรือเข้าห้องที่ว่าง'}
           </DialogDescription>
           {room ? (
@@ -627,7 +720,8 @@ export default function Home() {
                           <span>
                             <b>{r.name}</b>
                             <small>
-                              {MAPS[r.map as MapId]?.name} · #{r.code}
+                              {MAPS[r.map as MapId]?.name} ·{' '}
+                              {lengthLabel(r.days)} · #{r.code}
                             </small>
                           </span>
                           <strong>
