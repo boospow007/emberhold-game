@@ -27,3 +27,16 @@
 | วันที่ | หัวข้อ | ไฟล์ |
 |---|---|---|
 | 2026-09-08 | เพิ่ม CLAUDE.md และโฟลเดอร์ doc | [2026-09-08-claude-md.md](2026-09-08-claude-md.md) |
+| 2026-09-08 | เอกสารอ้างอิงเกม They Are Billions | [ref-game/They-Are-Billions.md](ref-game/They-Are-Billions.md) |
+| 2026-09-08 | เอกสารอ้างอิงเกม Vampire Survivors | [ref-game/Vampire-Survivors.md](ref-game/Vampire-Survivors.md) |
+| 2026-09-08 | เอกสารอ้างอิงเกม Thronefall | [ref-game/Thronefall.md](ref-game/Thronefall.md) |
+| 2026-09-08 | Game Doc ทิศทางหลักของเกม (v0.3: 1 วัน = 1 wave กดเริ่มเอง) | [game-doc/01-direction.md](game-doc/01-direction.md) |
+| 2026-09-08 | Game Doc อัปเกรดนอกเกมและวงจรเล่นซ้ำ (v0.2 ค่าตั้งต้นยืนยัน) | [game-doc/02-meta-progression.md](game-doc/02-meta-progression.md) |
+
+## เอกสารอ้างอิง (`ref-game/`)
+
+โฟลเดอร์ `ref-game/` เก็บบทวิเคราะห์เกมอื่นที่ใช้เป็นแรงบันดาลใจหรือเทียบเคียงการออกแบบ Emberhold ไม่ใช่บันทึกการแก้ไข แต่ละไฟล์ควรจบด้วยหัวข้อ "สิ่งที่ Emberhold นำมาใช้ได้"
+
+## เอกสารออกแบบเกม (`game-doc/`)
+
+โฟลเดอร์ `game-doc/` คือ Game Design Document ของ Emberhold ดูกติกาการใช้ป้าย [กำหนด] / [เสนอ] / [คำถาม] ใน `game-doc/README.md`
