@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { World, MAPS, obstacles, BuildKind, canBuild } from './engine';
+import { World, MAPS, Obstacle, BuildKind, canBuild } from './engine';
 export class GameScene {
   scene = new T.Scene();
   camera = new T.PerspectiveCamera(42, 1, 0.1, 180);
@@ -22,6 +22,7 @@ export class GameScene {
   gemGroup = new T.Group();
   gemMeshes = new Map<number, T.Mesh>();
   gemGeometry = new T.OctahedronGeometry(0.14);
+  terrainMeshes = new Map<number, T.Group>();
   disposed = false;
   constructor(
     public container: HTMLElement,
@@ -82,43 +83,7 @@ export class GameScene {
       map === 'snow' ? 0xb6c8c7 : map === 'desert' ? 0xb89869 : 0x7d8861,
     );
     this.root.add(cross);
-    for (const o of obstacles(map)) {
-      const g = new T.Group();
-      g.position.set(o.x, 0, o.z);
-      if (o.kind === 'tree') {
-        const trunk = this.box(0.35, 1.4, 0.35, 0x5d4733);
-        trunk.position.y = 0.7;
-        g.add(trunk);
-        for (let j = 0; j < 3; j++) {
-          const m = new T.Mesh(
-            new T.ConeGeometry(o.r * 1.5 * (1 - j * 0.17), 2, 5),
-            this.mat(
-              map === 'snow'
-                ? j === 2
-                  ? 0xdbe5dd
-                  : 0x72998e
-                : j === 2
-                  ? 0x436e4e
-                  : 0x315b42,
-            ),
-          );
-          m.position.y = 1.7 + j * 0.7;
-          m.castShadow = true;
-          g.add(m);
-        }
-      } else {
-        const r = new T.Mesh(
-          new T.DodecahedronGeometry(o.r),
-          this.mat(map === 'desert' ? 0x8b654d : 0x7e8b83),
-        );
-        r.position.y = o.r * 0.45;
-        r.scale.set(1, 1.1, 0.9);
-        r.rotation.set(0.2, o.x, 0.3);
-        r.castShadow = true;
-        g.add(r);
-      }
-      this.root.add(g);
-    }
+    this.map = map;
     for (let i = 0; i < 110; i++) {
       const x = Math.sin(i * 173.3) * 24,
         z = Math.cos(i * 52.7) * 24;
@@ -161,7 +126,88 @@ export class GameScene {
     this.camera.fov = this.width / this.height < 0.75 ? 48 : 42;
     this.camera.updateProjectionMatrix();
   }
-  building(kind: string, branch = '') {
+  terrainMesh(o: Obstacle) {
+    const g = new T.Group();
+    const map = this.map;
+    g.position.set(o.x, 0, o.z);
+    if (o.kind === 'tree') {
+      const trunk = this.box(0.35, 1.4, 0.35, 0x5d4733);
+      trunk.position.y = 0.7;
+      g.add(trunk);
+      for (let j = 0; j < 3; j++) {
+        const m = new T.Mesh(
+          new T.ConeGeometry(o.r * 1.5 * (1 - j * 0.17), 2, 5),
+          this.mat(
+            map === 'snow'
+              ? j === 2
+                ? 0xdbe5dd
+                : 0x72998e
+              : j === 2
+                ? 0x436e4e
+                : 0x315b42,
+          ),
+        );
+        m.position.y = 1.7 + j * 0.7;
+        m.castShadow = true;
+        g.add(m);
+      }
+    } else {
+      const r = new T.Mesh(
+        new T.DodecahedronGeometry(o.r),
+        this.mat(
+          o.kind === 'ore' ? 0x6b5a4a : map === 'desert' ? 0x8b654d : 0x7e8b83,
+        ),
+      );
+      r.position.y = o.r * 0.45;
+      r.scale.set(1, 1.1, 0.9);
+      r.rotation.set(0.2, o.x, 0.3);
+      r.castShadow = true;
+      g.add(r);
+      if (o.kind === 'ore') {
+        for (let j = 0; j < 3; j++) {
+          const vein = new T.Mesh(
+            new T.OctahedronGeometry(0.16),
+            new T.MeshStandardMaterial({
+              color: 0xd9b25a,
+              emissive: 0x4a3a10,
+              roughness: 0.5,
+              metalness: 0.6,
+            }),
+          );
+          vein.position.set(
+            Math.sin(j * 2.1 + o.x) * o.r * 0.6,
+            o.r * 0.5 + j * 0.2,
+            Math.cos(j * 2.1 + o.z) * o.r * 0.6,
+          );
+          g.add(vein);
+        }
+      }
+    }
+    return g;
+  }
+  syncTerrain(w: World) {
+    const live = new Set<number>();
+    for (const o of w.terrain) {
+      live.add(o.id);
+      let g = this.terrainMeshes.get(o.id);
+      if (!g) {
+        g = this.terrainMesh(o);
+        this.root.add(g);
+        this.terrainMeshes.set(o.id, g);
+      }
+      if (o.kind === 'tree') {
+        const k = 0.6 + 0.4 * Math.min(1, o.wood / 30);
+        g.scale.set(k, k, k);
+      }
+    }
+    for (const [id, g] of this.terrainMeshes)
+      if (!live.has(id)) {
+        this.root.remove(g);
+        this.disposeGeometry(g);
+        this.terrainMeshes.delete(id);
+      }
+  }
+  building(kind: string, branch = '', level = 1) {
     const g = new T.Group();
     if (kind === 'keep') {
       const base = this.box(3.2, 1, 3.2, 0xa9afa0);
@@ -193,12 +239,17 @@ export class GameScene {
       light.position.y = 4;
       g.add(light);
     } else if (kind === 'wall') {
-      const b = this.box(1.25, 1.5, 1.25, 0xa2aa98);
-      b.position.y = 0.75;
+      const b = this.box(
+        1.25,
+        1.5 + (level - 1) * 0.3,
+        1.25,
+        level >= 2 ? 0x8d9294 : 0xa2aa98,
+      );
+      b.position.y = (1.5 + (level - 1) * 0.3) / 2;
       g.add(b);
       for (const x of [-0.43, 0.43]) {
-        const c = this.box(0.35, 0.35, 1.25, 0xc0c3ac);
-        c.position.set(x, 1.65, 0);
+        const c = this.box(0.35, 0.35, 1.25, level >= 2 ? 0xb3b7b5 : 0xc0c3ac);
+        c.position.set(x, 1.65 + (level - 1) * 0.3, 0);
         g.add(c);
       }
     } else if (kind === 'farm') {
@@ -221,6 +272,116 @@ export class GameScene {
       }
       fan.position.set(0, 1.8, 0.9);
       g.add(fan);
+    } else if (kind === 'house') {
+      const w = 1.3 + level * 0.15;
+      const b = this.box(
+        w,
+        0.9 + level * 0.25,
+        w,
+        level >= 3 ? 0xc9c2ae : 0xd9b98a,
+      );
+      b.position.y = (0.9 + level * 0.25) / 2;
+      g.add(b);
+      const r = new T.Mesh(
+        new T.ConeGeometry(w * 0.95, 0.9, 4),
+        this.mat(level >= 2 ? 0x8a4a3a : 0xa45c3d),
+      );
+      r.rotation.y = Math.PI / 4;
+      r.position.y = 0.9 + level * 0.25 + 0.45;
+      g.add(r);
+      const door = this.box(0.3, 0.45, 0.06, 0x4a3524);
+      door.position.set(0, 0.23, w / 2 + 0.01);
+      g.add(door);
+    } else if (kind === 'sawmill') {
+      const b = this.box(1.6, 0.9, 1.3, 0x8f6b48);
+      b.position.y = 0.45;
+      g.add(b);
+      const r = this.box(1.9, 0.12, 1.6, 0x5d4733);
+      r.position.y = 1.0;
+      g.add(r);
+      const blade = new T.Mesh(
+        new T.CylinderGeometry(0.45, 0.45, 0.06, 12),
+        this.mat(0xb9bcb5),
+      );
+      blade.rotation.z = Math.PI / 2;
+      blade.position.set(0.9, 0.7, 0);
+      blade.name = 'fan';
+      g.add(blade);
+      const log = this.box(0.3, 0.3, 1.4, 0x7a5a3c);
+      log.position.set(-0.6, 1.2, 0);
+      g.add(log);
+    } else if (kind === 'quarry' || kind === 'goldmine' || kind === 'mine') {
+      const base = new T.Mesh(
+        new T.DodecahedronGeometry(1),
+        this.mat(
+          kind === 'goldmine'
+            ? 0x8d7a55
+            : kind === 'mine'
+              ? 0x5a5150
+              : 0x7e8b83,
+        ),
+      );
+      base.position.y = 0.4;
+      base.scale.set(1.1, 0.9, 1);
+      g.add(base);
+      const frame = this.box(0.9, 1.0, 0.12, 0x5d4733);
+      frame.position.set(0, 0.5, 1.0);
+      g.add(frame);
+      const hole = this.box(0.6, 0.7, 0.06, 0x1b1a17);
+      hole.position.set(0, 0.35, 1.05);
+      g.add(hole);
+      const cart = this.box(0.5, 0.3, 0.4, 0x4a3524);
+      cart.position.set(0.9, 0.15, 0.9);
+      g.add(cart);
+      const ore = new T.Mesh(
+        new T.OctahedronGeometry(0.18),
+        new T.MeshStandardMaterial({
+          color:
+            kind === 'goldmine'
+              ? 0xf1c454
+              : kind === 'mine'
+                ? 0xa9b1b8
+                : 0xc7cfc9,
+          metalness: 0.5,
+          roughness: 0.4,
+        }),
+      );
+      ore.position.set(0.9, 0.4, 0.9);
+      g.add(ore);
+      for (let i = 1; i < level; i++) {
+        const lamp = new T.Mesh(
+          new T.OctahedronGeometry(0.1),
+          new T.MeshBasicMaterial({ color: 0xffc46a }),
+        );
+        lamp.position.set(-0.7 + i * 0.5, 1.15, 0.9);
+        g.add(lamp);
+      }
+    } else if (kind === 'ballista') {
+      const b = this.box(1.5, 1.2, 1.5, 0x9a9c8a);
+      b.position.y = 0.6;
+      g.add(b);
+      const top = this.box(
+        1.8,
+        0.3,
+        1.8,
+        branch === 'heavy' ? 0xc8a569 : 0xb8b09a,
+      );
+      top.position.y = 1.35;
+      g.add(top);
+      const arm = this.box(2.2, 0.18, 0.18, 0x67452c);
+      arm.position.y = 1.85;
+      g.add(arm);
+      const rail = this.box(0.2, 0.2, 1.9, 0x403b32);
+      rail.position.set(0, 1.85, 0.2);
+      g.add(rail);
+      const bolt = this.box(
+        0.1,
+        0.1,
+        1.2,
+        branch === 'rapid' ? 0xe9bf6e : 0xd8d2c0,
+      );
+      bolt.position.set(0, 2.0, 0.3);
+      g.add(bolt);
     } else if (kind === 'shrine') {
       const b = this.box(1.5, 0.4, 1.5, 0xb5b5a4);
       b.position.y = 0.2;
@@ -346,6 +507,7 @@ export class GameScene {
       this.follow.z + (mobile ? 23 : 25),
     );
     this.camera.lookAt(this.follow.x, 0, this.follow.z - 2);
+    this.syncTerrain(w);
     const live = new Set<string>();
     for (const b of w.buildings) {
       live.add(b.id);
@@ -358,7 +520,7 @@ export class GameScene {
         g = undefined;
       }
       if (!g) {
-        g = this.building(b.kind, b.branch);
+        g = this.building(b.kind, b.branch, b.level);
         g.userData.key = key;
         g.position.set(b.x, 0, b.z);
         this.scene.add(g);
@@ -366,6 +528,7 @@ export class GameScene {
       }
       const fan = g.getObjectByName('fan');
       if (fan) fan.rotation.z += dt;
+      if (b.kind === 'keep') g.scale.setScalar(1 + (b.level - 1) * 0.08);
       this.health(g, b.hp, b.maxHp, b.kind === 'keep' ? 5.3 : 3.3);
     }
     for (const u of [...w.players, ...w.enemies]) {
@@ -417,7 +580,15 @@ export class GameScene {
     this.clearDynamic(this.effects);
     for (const e of w.effects) {
       const color =
-        e.kind === 'staff' ? 0x9de0ed : e.kind === 'hit' ? 0xf98977 : 0xffdc8c;
+        e.kind === 'staff'
+          ? 0x9de0ed
+          : e.kind === 'hit'
+            ? 0xf98977
+            : e.kind === 'chop'
+              ? 0xc9a36a
+              : e.kind === 'bolt'
+                ? 0xffffff
+                : 0xffdc8c;
       const points = [new T.Vector3(e.x, 1, e.z), new T.Vector3(e.tx, 1, e.tz)];
       const geo = new T.BufferGeometry().setFromPoints(points);
       const line = new T.Line(
@@ -551,6 +722,7 @@ export class GameScene {
     this.materials.clear();
     this.gemGeometry.dispose();
     this.gemMeshes.clear();
+    this.terrainMeshes.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

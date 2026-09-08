@@ -14,12 +14,20 @@ import {
   Swords,
   Home,
   Pause,
-  Trees,
   Sparkles,
   Lock,
   Target,
   Radio,
   Check,
+  Axe,
+  Pickaxe,
+  Wheat,
+  Mountain,
+  Users,
+  Castle,
+  Gem,
+  Logs,
+  Crosshair,
 } from 'lucide-react';
 import {
   Dialog,
@@ -37,13 +45,26 @@ import {
   Building,
   Input,
   Command,
+  Cost,
+  Resource,
   BUILDINGS,
   MAPS,
+  RESOURCES,
+  RESOURCE_ORDER,
+  KEEP_MAX,
+  KEEP_RADIUS,
+  KEEP_WORKERS,
   step,
   command,
-  canBuild,
   dist,
   reward,
+  workerCap,
+  workersUsed,
+  upgradeCost,
+  branches,
+  buildGate,
+  buildError,
+  upgradeError,
 } from '@/lib/game/engine';
 import { api } from '@/lib/game/api';
 export type Session = {
@@ -53,6 +74,54 @@ export type Session = {
   weapon: Weapon;
 };
 const emptyInput = (): Input => ({ x: 0, z: 0, commands: [] });
+const RES_ICON: Record<Resource, typeof Coins> = {
+  gold: Coins,
+  wood: Logs,
+  stone: Mountain,
+  iron: Pickaxe,
+  food: Wheat,
+};
+const BUILD_ICON: Record<BuildKind, typeof Coins> = {
+  house: Home,
+  farm: Wheat,
+  sawmill: Axe,
+  goldmine: Gem,
+  quarry: Mountain,
+  mine: Pickaxe,
+  tower: Target,
+  wall: Shield,
+  frost: Sparkles,
+  shrine: Heart,
+  ballista: Crosshair,
+};
+function CostChips({
+  cost,
+  res,
+}: {
+  cost: Cost;
+  res?: Record<Resource, number>;
+}) {
+  return (
+    <span className="cost-chips">
+      {RESOURCE_ORDER.filter((k) => cost[k]).map((k) => {
+        const Icon = RES_ICON[k];
+        const short = res && res[k] < (cost[k] || 0);
+        return (
+          <i key={k} className={short ? 'short' : ''}>
+            <Icon size={12} />
+            {cost[k]}
+          </i>
+        );
+      })}
+    </span>
+  );
+}
+const BRANCH_TEXT: Record<string, [string, string]> = {
+  rapid: ['ยิงเร็ว', 'เพิ่มอัตราการยิง 80%'],
+  heavy: ['ยิงหนัก', 'เพิ่มพลังโจมตี 80% และระยะยิง'],
+  grow: ['ขยาย', 'เพิ่มระดับ ผลผลิต และพลังชีวิต'],
+  keep: ['อัปเกรดฐานแม่', 'สร้างได้ไกลขึ้น คนงานเพิ่ม และปลดล็อกสิ่งก่อสร้างระดับถัดไป'],
+};
 export default function Game({
   session,
   onExit,
@@ -295,7 +364,10 @@ export default function Game({
       ? hud.buildings
           .filter((b) => b.kind !== 'keep' && dist(me, b) < 5)
           .sort((a, b) => dist(me, a) - dist(me, b))[0]
-      : null;
+      : null,
+    nearKeep = !!me && !!keep && dist(me, keep) < 6,
+    cap = workerCap(hud),
+    used = workersUsed(hud);
   function setPlacement(p: typeof place) {
     placement.current = p;
     setPlace(p);
@@ -398,19 +470,44 @@ export default function Game({
             {hud.phase === 'prep' ? 'BUILD & BREATHE' : 'HOLD THE LINE'}
           </span>
           <strong>
-            WAVE <b>{String(hud.wave || 1).padStart(2, '0')}</b>
+            วันที่{' '}
+            <b>
+              {String(hud.phase === 'prep' ? hud.wave + 1 : hud.wave).padStart(
+                2,
+                '0',
+              )}
+            </b>
           </strong>
           <span>
             {hud.phase === 'prep'
-              ? `พักสร้างฐาน · ${Math.ceil(hud.timer)} วินาที`
+              ? host
+                ? 'เตรียมฐาน · กดเริ่มวันเมื่อพร้อม'
+                : 'เตรียมฐาน · รอเจ้าของห้องเริ่มวัน'
               : `เหลือศัตรู ${aliveEnemies} · ${time}`}
           </span>
         </div>
-        <div className="gold-count">
-          <Coins size={18} />
-          <b>{Math.floor(hud.gold)}</b>
-          <small>เงินกองกลาง</small>
+        <div className="keep-level">
+          <Castle size={16} />
+          <b>L{keep?.level || 1}</b>
+          <small>ฐานแม่</small>
         </div>
+      </section>
+      <section className="resource-bar" aria-label="ทรัพยากรกองกลาง">
+        {RESOURCE_ORDER.map((k) => {
+          const Icon = RES_ICON[k];
+          return (
+            <span key={k} title={RESOURCES[k].name}>
+              <Icon size={13} />
+              <b>{Math.floor(hud.res[k])}</b>
+            </span>
+          );
+        })}
+        <span className={used > cap ? 'strain' : ''} title="คนงาน">
+          <Users size={13} />
+          <b>
+            {used}/{cap}
+          </b>
+        </span>
       </section>
       <div className="keep-health">
         <span>
@@ -504,11 +601,17 @@ export default function Game({
               <small>
                 {' '}
                 ·{' '}
-                {me?.weapon === 'bow'
-                  ? 'ธนู'
-                  : me?.weapon === 'sword'
-                    ? 'ดาบ'
-                    : 'คทา'}
+                {me?.task === 'chop' ? (
+                  <em className="chopping">
+                    <Axe size={11} /> กำลังตัดไม้
+                  </em>
+                ) : me?.weapon === 'bow' ? (
+                  'ธนู'
+                ) : me?.weapon === 'sword' ? (
+                  'ดาบ'
+                ) : (
+                  'คทา'
+                )}
               </small>
             </span>
             <div className="xp-bar">
@@ -540,6 +643,17 @@ export default function Game({
                     <ArrowUp />
                     <span>อัปเกรด</span>
                   </button>
+                ) : nearKeep ? (
+                  <button
+                    className="round-action"
+                    onClick={() => {
+                      setSelected(keep);
+                      openPanel('keep');
+                    }}
+                  >
+                    <Castle />
+                    <span>ฐานแม่</span>
+                  </button>
                 ) : (
                   <span className="control-hint">
                     ลากบนสนาม
@@ -553,7 +667,7 @@ export default function Game({
                     onClick={() => send({ type: 'next' })}
                   >
                     <Play size={19} fill="currentColor" />
-                    <span>เริ่ม Wave</span>
+                    <span>เริ่มวัน</span>
                   </button>
                 )}
               </>
@@ -578,7 +692,9 @@ export default function Game({
       {place && (
         <div className="placement-bar">
           <span>
-            <Target size={16} /> ลากบนพื้นเพื่อวาง {BUILDINGS[place.kind].name}
+            <Target size={16} />{' '}
+            {(me && buildError(hud, me, place.kind, place.x, place.z)) ||
+              `ลากบนพื้นเพื่อวาง ${BUILDINGS[place.kind].name}`}
           </span>
           <div>
             <button className="secondary" onClick={() => setPlacement(null)}>
@@ -587,8 +703,8 @@ export default function Game({
             <button
               className="primary"
               disabled={
-                !canBuild(hud, place.kind, place.x, place.z) ||
-                hud.gold < BUILDINGS[place.kind].cost ||
+                !me ||
+                !!buildError(hud, me, place.kind, place.x, place.z) ||
                 hud.phase !== 'prep'
               }
               onClick={() => {
@@ -598,13 +714,14 @@ export default function Game({
                 }
               }}
             >
-              <Check size={17} /> สร้าง · {BUILDINGS[place.kind].cost}
+              <Check size={17} /> สร้าง{' '}
+              <CostChips cost={BUILDINGS[place.kind].cost} res={hud.res} />
             </button>
           </div>
         </div>
       )}
       <Dialog
-        open={['build', 'upgrade', 'perk', 'pause'].includes(panel)}
+        open={['build', 'upgrade', 'keep', 'perk', 'pause'].includes(panel)}
         onOpenChange={(open) => {
           if (!open) openPanel('');
         }}
@@ -618,70 +735,74 @@ export default function Game({
               ? 'ขยายอาณาจักร'
               : panel === 'upgrade'
                 ? `อัปเกรด${selected ? BUILDINGS[selected.kind as BuildKind]?.name : ''}`
-                : panel === 'perk'
-                  ? 'เลือกพรแห่งเปลวไฟ'
-                  : 'พักใต้แสงไฟ'}
+                : panel === 'keep'
+                  ? `ฐานแม่ ระดับ ${keep?.level || 1}`
+                  : panel === 'perk'
+                    ? 'เลือกพรแห่งเปลวไฟ'
+                    : 'พักใต้แสงไฟ'}
           </DialogTitle>
           <DialogDescription>
             {panel === 'build'
-              ? 'เลือกสิ่งก่อสร้าง แล้วลากไปวางบนพื้นที่ว่าง'
+              ? `เลือกสิ่งก่อสร้าง แล้วลากไปวางในรัศมี ${KEEP_RADIUS[keep?.level || 1]} จากฐานแม่`
               : panel === 'upgrade'
                 ? 'เดินใกล้อาคารแล้วเลือกสายพัฒนา'
-                : panel === 'perk'
-                  ? 'พรนี้จะอยู่กับคุณตลอดรอบนี้'
-                  : session.room
-                    ? 'เกมของเพื่อนยังดำเนินต่อไป'
-                    : 'เกมหยุดชั่วคราวแล้ว'}
+                : panel === 'keep'
+                  ? 'อัปเกรดฐานแม่เพื่อขยายรัศมีก่อสร้าง เพิ่มคนงาน และปลดล็อกระดับสิ่งก่อสร้าง'
+                  : panel === 'perk'
+                    ? 'พรนี้จะอยู่กับคุณตลอดรอบนี้'
+                    : session.room
+                      ? 'เกมของเพื่อนยังดำเนินต่อไป'
+                      : 'เกมหยุดชั่วคราวแล้ว'}
           </DialogDescription>
           {panel === 'build' && (
             <Tabs defaultValue="defense">
               <TabsList className="build-tabs">
-                <TabsTrigger value="defense">แนวป้องกัน</TabsTrigger>
+                <TabsTrigger value="defense">ป้องกัน</TabsTrigger>
                 <TabsTrigger value="economy">เศรษฐกิจ</TabsTrigger>
+                <TabsTrigger value="housing">ที่พัก</TabsTrigger>
               </TabsList>
-              {['defense', 'economy'].map((tab) => (
+              {(['defense', 'economy', 'housing'] as const).map((tab) => (
                 <TabsContent value={tab} key={tab}>
                   <div className="build-options">
-                    {Object.entries(BUILDINGS)
+                    {(
+                      Object.entries(BUILDINGS) as [
+                        BuildKind,
+                        (typeof BUILDINGS)[BuildKind],
+                      ][]
+                    )
                       .filter(([, b]) => b.tab === tab)
                       .map(([key, b]) => {
-                        const locked =
-                          ['frost', 'shrine'].includes(key) &&
-                          !session.profile.unlocks.includes(key);
-                        const Icon =
-                          key === 'wall'
-                            ? Shield
-                            : key === 'farm'
-                              ? Trees
-                              : key === 'shrine'
-                                ? Heart
-                                : key === 'frost'
-                                  ? Sparkles
-                                  : Target;
+                        const reason = me
+                          ? buildGate(hud, me, key)
+                          : 'กำลังโหลด';
+                        const Icon = BUILD_ICON[key];
                         return (
                           <button
                             key={key}
-                            disabled={
-                              locked ||
-                              hud.gold < b.cost ||
-                              hud.phase !== 'prep'
-                            }
-                            onClick={() => chooseBuild(key as BuildKind)}
+                            disabled={!!reason || hud.phase !== 'prep'}
+                            onClick={() => chooseBuild(key)}
                           >
                             <Icon />
                             <span>
-                              <b>{b.name}</b>
-                              <small>
-                                {locked ? 'ปลดล็อกได้ที่ค่ายพักนอกเกม' : b.desc}
-                              </small>
+                              <b>
+                                {b.name}
+                                {b.tier > 1 && (
+                                  <small className="tier"> ฐาน L{b.tier}</small>
+                                )}
+                              </b>
+                              <small>{reason || b.desc}</small>
                             </span>
                             <strong>
-                              {locked ? (
+                              {reason === 'ยังไม่ได้ปลดล็อก' ? (
                                 <Lock size={17} />
                               ) : (
                                 <>
-                                  <Coins size={13} />
-                                  {b.cost}
+                                  <CostChips cost={b.cost} res={hud.res} />
+                                  {b.workers > 0 && (
+                                    <small className="worker-cost">
+                                      <Users size={11} /> {b.workers}
+                                    </small>
+                                  )}
                                 </>
                               )}
                             </strong>
@@ -693,53 +814,39 @@ export default function Game({
               ))}
             </Tabs>
           )}
-          {panel === 'upgrade' && selected && (
+          {(panel === 'upgrade' || panel === 'keep') && selected && me && (
             <>
               <div className="upgrade-info">
-                ระดับ {selected.level} / 3{' '}
+                ระดับ {selected.level} /{' '}
+                {selected.kind === 'keep' ? KEEP_MAX : 3}{' '}
                 <span>{Math.ceil(selected.hp)} HP</span>
+                {selected.kind === 'keep' && (
+                  <span>
+                    <Users size={13} /> คนงานจากฐาน{' '}
+                    {KEEP_WORKERS[selected.level]}
+                  </span>
+                )}
               </div>
-              {selected.level >= 3 ? (
+              {(
+                selected.kind === 'keep'
+                  ? selected.level >= KEEP_MAX
+                  : selected.level >= 3
+              ) ? (
                 <p>อาคารนี้อัปเกรดเต็มแล้ว</p>
               ) : (
-                <div className="perk-options">
-                  {[
-                    [
-                      'rapid',
-                      selected.kind === 'tower' ? 'ยิงเร็ว' : 'เสริมกำลัง',
-                      selected.kind === 'tower'
-                        ? 'เพิ่มอัตราการยิง 80%'
-                        : selected.kind === 'farm'
-                          ? 'เพิ่มรายได้ +18 ต่อ Wave'
-                          : 'เพิ่มระดับและพลังชีวิต',
-                    ],
-                    [
-                      'heavy',
-                      selected.kind === 'tower' ? 'ยิงหนัก' : 'เสริมความทนทาน',
-                      selected.kind === 'tower'
-                        ? 'เพิ่มพลังโจมตี 80% และระยะยิง'
-                        : selected.kind === 'farm'
-                          ? 'เพิ่มรายได้ +18 ต่อ Wave'
-                          : 'เพิ่มระดับและพลังชีวิต',
-                    ],
-                  ]
-                    .filter(
-                      (_, i) =>
-                        selected.kind === 'tower' ||
-                        selected.kind === 'frost' ||
-                        i === 0,
-                    )
-                    .map(([branch, name, desc]) => (
+                <div
+                  className={
+                    'perk-options' +
+                    (branches(selected.kind).length === 1 ? ' one' : '')
+                  }
+                >
+                  {branches(selected.kind).map((branch) => {
+                    const [name, desc] = BRANCH_TEXT[branch];
+                    const err = upgradeError(hud, me, selected, branch);
+                    return (
                       <button
                         key={branch}
-                        disabled={
-                          hud.phase !== 'prep' ||
-                          hud.gold <
-                            Math.round(
-                              BUILDINGS[selected.kind as BuildKind].cost *
-                                (selected.level === 1 ? 1 : 1.6),
-                            )
-                        }
+                        disabled={hud.phase !== 'prep' || !!err}
                         onClick={() => {
                           if (
                             send({ type: 'upgrade', id: selected.id, branch })
@@ -749,18 +856,18 @@ export default function Game({
                           }
                         }}
                       >
-                        <ArrowUp />
+                        {selected.kind === 'keep' ? <Castle /> : <ArrowUp />}
                         <b>{name}</b>
-                        <small>{desc}</small>
-                        <span>
-                          {Math.round(
-                            BUILDINGS[selected.kind as BuildKind].cost *
-                              (selected.level === 1 ? 1 : 1.6),
-                          )}{' '}
-                          เหรียญ
-                        </span>
+                        <small>
+                          {selected.kind === 'keep'
+                            ? `รัศมี ${KEEP_RADIUS[selected.level + 1]} · คนงาน +${KEEP_WORKERS[selected.level + 1] - KEEP_WORKERS[selected.level]} · HP +500`
+                            : desc}
+                        </small>
+                        <CostChips cost={upgradeCost(selected)} res={hud.res} />
+                        {err && <small className="lock-reason">{err}</small>}
                       </button>
-                    ))}
+                    );
+                  })}
                 </div>
               )}
             </>

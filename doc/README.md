@@ -32,6 +32,7 @@
 | 2026-09-08 | เอกสารอ้างอิงเกม Thronefall | [ref-game/Thronefall.md](ref-game/Thronefall.md) |
 | 2026-09-08 | Game Doc ทิศทางหลักของเกม (v0.3: 1 วัน = 1 wave กดเริ่มเอง) | [game-doc/01-direction.md](game-doc/01-direction.md) |
 | 2026-09-08 | Game Doc อัปเกรดนอกเกมและวงจรเล่นซ้ำ (v0.2 ค่าตั้งต้นยืนยัน) | [game-doc/02-meta-progression.md](game-doc/02-meta-progression.md) |
+| 2026-09-08 | เฟส 1: ทรัพยากร 5 ชนิด คนงาน ระดับฐานแม่ สิ่งก่อสร้าง 11 ชนิด | [2026-09-08-phase1-resources.md](2026-09-08-phase1-resources.md) |
 
 ## เอกสารอ้างอิง (`ref-game/`)
 

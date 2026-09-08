@@ -1,6 +1,28 @@
 export type Weapon = 'bow' | 'sword' | 'staff';
 export type MapId = 'forest' | 'desert' | 'snow';
-export type BuildKind = 'tower' | 'wall' | 'farm' | 'frost' | 'shrine';
+export type Resource = 'gold' | 'wood' | 'stone' | 'iron' | 'food';
+export type Cost = Partial<Record<Resource, number>>;
+export type BuildKind =
+  | 'house'
+  | 'farm'
+  | 'sawmill'
+  | 'goldmine'
+  | 'quarry'
+  | 'mine'
+  | 'tower'
+  | 'wall'
+  | 'frost'
+  | 'shrine'
+  | 'ballista';
+export type ObstacleKind = 'tree' | 'rock' | 'ore';
+export type Obstacle = {
+  id: number;
+  x: number;
+  z: number;
+  r: number;
+  kind: ObstacleKind;
+  wood: number;
+};
 export type Profile = {
   id: string;
   name: string;
@@ -31,6 +53,7 @@ export type Player = Unit & {
   lastHit: number;
   color: number;
   unlocks: string[];
+  task: '' | 'chop';
 };
 export type Enemy = Unit & {
   kind: string;
@@ -70,11 +93,13 @@ export type World = {
   wave: number;
   timer: number;
   elapsed: number;
-  gold: number;
+  res: Record<Resource, number>;
   kills: number;
   players: Player[];
   enemies: Enemy[];
   buildings: Building[];
+  terrain: Obstacle[];
+  terrainVersion: number;
   effects: Effect[];
   gems: Gem[];
   left: number;
@@ -106,92 +131,488 @@ export const MAPS = {
     sky: 0x283b48,
   },
 };
-export const BUILDINGS: Record<
-  BuildKind,
-  { name: string; cost: number; hp: number; desc: string; tab: string }
-> = {
+export const RESOURCES: Record<Resource, { name: string; short: string }> = {
+  gold: { name: 'ทอง', short: 'ทอง' },
+  wood: { name: 'ไม้', short: 'ไม้' },
+  stone: { name: 'หิน', short: 'หิน' },
+  iron: { name: 'เหล็ก', short: 'เหล็ก' },
+  food: { name: 'อาหาร', short: 'อาหาร' },
+};
+export const RESOURCE_ORDER: Resource[] = [
+  'gold',
+  'wood',
+  'stone',
+  'iron',
+  'food',
+];
+export type BuildInfo = {
+  name: string;
+  cost: Cost;
+  hp: number;
+  desc: string;
+  tab: 'defense' | 'economy' | 'housing';
+  tier: number;
+  workers: number;
+  node?: ObstacleKind;
+  upgrades?: Cost[];
+};
+export const BUILDINGS: Record<BuildKind, BuildInfo> = {
+  house: {
+    name: 'บ้านคนงาน',
+    cost: { wood: 25 },
+    hp: 150,
+    desc: 'คนงาน 2 / 5 / 10 ตามระดับ • อัปเกรดต้องใช้อาหาร',
+    tab: 'housing',
+    tier: 1,
+    workers: 0,
+    upgrades: [
+      { wood: 30, food: 20 },
+      { stone: 30, food: 40 },
+    ],
+  },
+  farm: {
+    name: 'ไร่นา',
+    cost: { wood: 30 },
+    hp: 120,
+    desc: '+10 อาหารต่อระดับเมื่อจบวัน',
+    tab: 'economy',
+    tier: 1,
+    workers: 0,
+  },
+  sawmill: {
+    name: 'โรงเลื่อย',
+    cost: { wood: 20, gold: 20 },
+    hp: 120,
+    desc: 'ตัดไม้เองจากต้นไม้ในรัศมี +4 ต่อต้น (สูงสุด 3)',
+    tab: 'economy',
+    tier: 1,
+    workers: 0,
+  },
+  goldmine: {
+    name: 'เหมืองทอง',
+    cost: { wood: 40, stone: 20 },
+    hp: 160,
+    desc: 'สร้างบนหิน • +20 ทองต่อระดับเมื่อจบวัน',
+    tab: 'economy',
+    tier: 2,
+    workers: 1,
+    node: 'rock',
+  },
+  quarry: {
+    name: 'เหมืองหิน',
+    cost: { wood: 40, gold: 30 },
+    hp: 160,
+    desc: 'สร้างบนหิน • +12 หินต่อระดับเมื่อจบวัน',
+    tab: 'economy',
+    tier: 2,
+    workers: 1,
+    node: 'rock',
+  },
+  mine: {
+    name: 'เหมืองเหล็ก',
+    cost: { stone: 40, gold: 50 },
+    hp: 180,
+    desc: 'สร้างบนสายแร่ • +8 เหล็กต่อระดับเมื่อจบวัน',
+    tab: 'economy',
+    tier: 3,
+    workers: 2,
+    node: 'ore',
+  },
   tower: {
     name: 'ป้อมธนู',
-    cost: 35,
+    cost: { wood: 25, gold: 15 },
     hp: 180,
     desc: 'ยิงไกล • เลือกสายยิงเร็ว / ยิงหนัก',
     tab: 'defense',
+    tier: 1,
+    workers: 1,
   },
   wall: {
     name: 'กำแพง',
-    cost: 12,
+    cost: { wood: 8 },
     hp: 330,
-    desc: 'รับแรงบุก • ยื้อเวลาให้ป้อม',
+    desc: 'รับแรงบุก • อัปเกรดเป็นกำแพงหินด้วยหิน',
     tab: 'defense',
-  },
-  farm: {
-    name: 'โรงสี',
-    cost: 40,
-    hp: 120,
-    desc: '+18 เหรียญเมื่อผ่านแต่ละ Wave',
-    tab: 'economy',
+    tier: 1,
+    workers: 0,
+    upgrades: [{ stone: 10 }, { stone: 20 }],
   },
   frost: {
     name: 'ป้อมเวท',
-    cost: 60,
+    cost: { stone: 30, gold: 40 },
     hp: 160,
     desc: 'ยิงเวทชะลอศัตรูเป็นกลุ่ม',
     tab: 'defense',
+    tier: 2,
+    workers: 2,
   },
   shrine: {
     name: 'ศาลาฟื้นฟู',
-    cost: 55,
+    cost: { wood: 30, gold: 35 },
     hp: 140,
     desc: 'ฟื้นฟูผู้เล่นในระยะรอบอาคาร',
     tab: 'economy',
+    tier: 2,
+    workers: 1,
   },
+  ballista: {
+    name: 'บัลลิสตา',
+    cost: { iron: 25, stone: 30, gold: 40 },
+    hp: 220,
+    desc: 'ยิงไกลมาก ระเบิดเป็นวง',
+    tab: 'defense',
+    tier: 3,
+    workers: 2,
+  },
+};
+export const KEEP_MAX = 4;
+export const KEEP_UPGRADES: Cost[] = [
+  { wood: 60, stone: 30 },
+  { stone: 60, iron: 30 },
+  { iron: 60, gold: 200 },
+];
+export const KEEP_RADIUS = [0, 11, 15, 19, 23];
+export const HOUSE_WORKERS = [0, 2, 5, 10];
+export const KEEP_WORKERS = [0, 3, 5, 7, 9];
+export const START_RES: Record<Resource, number> = {
+  gold: 60,
+  wood: 60,
+  stone: 0,
+  iron: 0,
+  food: 20,
 };
 export const COLORS = [0xf8c66c, 0x85c8ee, 0xd3a2ef, 0xf6a29b];
 export const dist = (
   a: { x: number; z: number },
   b: { x: number; z: number },
 ) => Math.hypot(a.x - b.x, a.z - b.z);
-const terrainCache = new Map<
-  MapId,
-  { x: number; z: number; r: number; kind: string }[]
->();
-export function obstacles(map: MapId) {
-  const cached = terrainCache.get(map);
-  if (cached) return cached;
+export function obstacles(map: MapId): Obstacle[] {
   let seed = map === 'forest' ? 73 : map === 'desert' ? 197 : 331;
   const rand = () => {
     seed = (seed * 1664525 + 1013904223) >>> 0;
     return seed / 4294967296;
   };
-  const out: { x: number; z: number; r: number; kind: string }[] = [];
+  const out: Obstacle[] = [];
+  let rocks = 0;
   for (let i = 0; i < 65; i++) {
     const x = Math.round((rand() - 0.5) * 46),
       z = Math.round((rand() - 0.5) * 46);
+    const r = 0.65 + rand() * 0.5;
+    const roll = rand();
     if (
       Math.hypot(x, z) < 7 ||
       out.some((o) => Math.hypot(o.x - x, o.z - z) < 2.8)
     )
       continue;
+    let kind: ObstacleKind = map === 'desert' || roll <= 0.3 ? 'rock' : 'tree';
+    if (kind === 'rock' && ++rocks % 3 === 0) kind = 'ore';
     out.push({
+      id: out.length + 1,
       x,
       z,
-      r: 0.65 + rand() * 0.5,
-      kind: map === 'desert' ? 'rock' : rand() > 0.3 ? 'tree' : 'rock',
+      r,
+      kind,
+      wood: kind === 'tree' ? 30 : 0,
     });
   }
-  terrainCache.set(map, out);
   return out;
+}
+export const keepOf = (w: World) => w.buildings[0];
+export const buildRadius = (w: World) =>
+  KEEP_RADIUS[Math.min(KEEP_MAX, keepOf(w).level)];
+export function workerCap(w: World) {
+  return w.buildings.reduce(
+    (s, b) =>
+      s +
+      (b.kind === 'keep'
+        ? KEEP_WORKERS[Math.min(KEEP_MAX, b.level)]
+        : b.kind === 'house'
+          ? HOUSE_WORKERS[Math.min(3, b.level)]
+          : 0),
+    0,
+  );
+}
+export function workersUsed(w: World) {
+  return w.buildings.reduce(
+    (s, b) => s + (b.kind === 'keep' ? 0 : BUILDINGS[b.kind].workers),
+    0,
+  );
+}
+export function canAfford(w: World, cost: Cost) {
+  return (Object.keys(cost) as Resource[]).every(
+    (k) => w.res[k] >= (cost[k] || 0),
+  );
+}
+export function pay(w: World, cost: Cost) {
+  for (const k of Object.keys(cost) as Resource[]) w.res[k] -= cost[k] || 0;
+}
+export function missing(w: World, cost: Cost): Resource | null {
+  for (const k of RESOURCE_ORDER) if (w.res[k] < (cost[k] || 0)) return k;
+  return null;
+}
+export function upgradeCost(b: Building): Cost {
+  if (b.kind === 'keep')
+    return KEEP_UPGRADES[Math.min(KEEP_UPGRADES.length - 1, b.level - 1)];
+  const info = BUILDINGS[b.kind];
+  if (info.upgrades)
+    return info.upgrades[Math.min(info.upgrades.length - 1, b.level - 1)];
+  const mul = b.level === 1 ? 1 : 1.6;
+  const out: Cost = {};
+  for (const k of Object.keys(info.cost) as Resource[])
+    out[k] = Math.round((info.cost[k] || 0) * mul);
+  return out;
+}
+export function branches(kind: Building['kind']) {
+  return kind === 'tower' || kind === 'frost' || kind === 'ballista'
+    ? ['rapid', 'heavy']
+    : kind === 'keep'
+      ? ['keep']
+      : ['grow'];
+}
+export function nodeAt(w: World, kind: BuildKind, x: number, z: number) {
+  const need = BUILDINGS[kind].node;
+  if (!need) return null;
+  return (
+    w.terrain.find((o) => o.kind === need && dist(o, { x, z }) < 1.2) || null
+  );
+}
+export function newWorld(map: MapId): World {
+  return {
+    run: crypto.randomUUID(),
+    map,
+    phase: 'prep',
+    wave: 0,
+    timer: 0,
+    elapsed: 0,
+    res: { ...START_RES },
+    kills: 0,
+    players: [],
+    enemies: [],
+    buildings: [
+      {
+        id: 'keep',
+        kind: 'keep',
+        x: 0,
+        z: 0,
+        hp: 1000,
+        maxHp: 1000,
+        cool: 0,
+        angle: 0,
+        level: 1,
+        branch: '',
+      },
+    ],
+    terrain: obstacles(map),
+    terrainVersion: 0,
+    effects: [],
+    gems: [],
+    left: 0,
+    spawn: 0,
+    serial: 0,
+    acks: {},
+    notice: 'ตัดไม้ สร้างแนวป้องกัน แล้วกดเริ่มวันแรกเมื่อพร้อม',
+  };
+}
+export function addPlayer(w: World, profile: Profile, weapon: Weapon) {
+  if (w.players.some((p) => p.id === profile.id)) return;
+  const i = w.players.length;
+  w.players.push({
+    id: profile.id,
+    name: profile.name || 'ผู้พิทักษ์',
+    x: 2 + i,
+    z: 3,
+    hp: 100 + profile.vitality * 15,
+    maxHp: 100 + profile.vitality * 15,
+    cool: 0,
+    angle: 0,
+    weapon,
+    dead: 0,
+    level: 1,
+    xp: 0,
+    picks: 0,
+    power: 1 + profile.power * 0.08,
+    haste: 1,
+    lastHit: 0,
+    color: COLORS[i % 4],
+    unlocks: profile.unlocks,
+    task: '',
+  });
+}
+export function canBuild(w: World, kind: BuildKind, x: number, z: number) {
+  const r = kind === 'wall' ? 0.7 : 1.05;
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(z) ||
+    Math.abs(x) > 22 ||
+    Math.abs(z) > 22
+  )
+    return false;
+  if (Math.hypot(x, z) > buildRadius(w)) return false;
+  const node = nodeAt(w, kind, x, z);
+  if (BUILDINGS[kind].node && !node) return false;
+  return (
+    !w.buildings.some(
+      (b) =>
+        dist(b, { x, z }) <
+        (b.kind === 'keep' ? 2.6 : b.kind === 'wall' ? 0.8 : 1.1) + r,
+    ) && !w.terrain.some((o) => o !== node && dist(o, { x, z }) < o.r + r)
+  );
+}
+export function buildGate(w: World, p: Player, kind: BuildKind): string {
+  const d = BUILDINGS[kind];
+  if ((kind === 'frost' || kind === 'shrine') && !p.unlocks.includes(kind))
+    return 'ยังไม่ได้ปลดล็อก';
+  if (d.tier > keepOf(w).level) return `ต้องอัปเกรดฐานแม่เป็นระดับ ${d.tier}`;
+  const lack = missing(w, d.cost);
+  if (lack) return RESOURCES[lack].name + 'ไม่พอ';
+  if (d.workers && workersUsed(w) + d.workers > workerCap(w))
+    return 'คนงานไม่พอ สร้างหรืออัปเกรดบ้านคนงาน';
+  return '';
+}
+export function buildError(
+  w: World,
+  p: Player,
+  kind: BuildKind,
+  x: number,
+  z: number,
+): string {
+  const d = BUILDINGS[kind];
+  const gate = buildGate(w, p, kind);
+  if (gate) return gate;
+  if (Math.hypot(x, z) > buildRadius(w)) return 'ไกลจากฐานแม่เกินไป';
+  if (d.node && !nodeAt(w, kind, x, z))
+    return d.node === 'ore' ? 'ต้องวางบนสายแร่' : 'ต้องวางบนหิน';
+  if (!canBuild(w, kind, x, z)) return 'พื้นที่นี้วางไม่ได้';
+  if (w.buildings.length >= 90) return 'ฐานมีสิ่งก่อสร้างเต็มแล้ว';
+  return '';
+}
+export function upgradeError(w: World, p: Player, b: Building, branch: string) {
+  if (dist(p, b) > (b.kind === 'keep' ? 6 : 5)) return 'เดินเข้าใกล้อาคารก่อน';
+  if (b.kind === 'keep') {
+    if (b.level >= KEEP_MAX) return 'ฐานแม่ระดับสูงสุดแล้ว';
+  } else {
+    if (b.level >= 3) return 'อัปเกรดเต็มแล้ว';
+    if (b.level >= keepOf(w).level)
+      return `ต้องอัปเกรดฐานแม่เป็นระดับ ${b.level + 1} ก่อน`;
+  }
+  if (!branches(b.kind).includes(branch)) return 'เลือกสายอัปเกรด';
+  const lack = missing(w, upgradeCost(b));
+  if (lack) return RESOURCES[lack].name + 'ไม่พอ';
+  return '';
+}
+function clearFields() {
+  fields.clear();
+}
+export function command(w: World, pid: string, c: Command): string {
+  const p = w.players.find((p) => p.id === pid);
+  if (!p || w.phase === 'over') return 'รอบจบแล้ว';
+  if (c.type === 'next') {
+    if (w.phase === 'prep') startWave(w);
+    return '';
+  }
+  if (c.type === 'perk') {
+    if (p.picks < 1) return 'ยังไม่มีพรให้เลือก';
+    if (c.branch === 'power') p.power += 0.2;
+    else if (c.branch === 'haste') p.haste += 0.12;
+    else if (c.branch === 'vitality') {
+      p.maxHp += 25;
+      p.hp = Math.min(p.maxHp, p.hp + 50);
+    } else return 'พรไม่ถูกต้อง';
+    p.picks--;
+    return '';
+  }
+  if (w.phase !== 'prep') return 'สร้างและอัปเกรดได้ในช่วงพัก';
+  if (c.type === 'build') {
+    const k = c.kind;
+    if (!k || !Object.hasOwn(BUILDINGS, k)) return 'ไม่พบสิ่งก่อสร้าง';
+    const d = BUILDINGS[k];
+    let x = Math.round((c.x ?? 999) * 2) / 2,
+      z = Math.round((c.z ?? 999) * 2) / 2;
+    const err = buildError(w, p, k, x, z);
+    if (err) return err;
+    const node = nodeAt(w, k, x, z);
+    if (node) {
+      x = node.x;
+      z = node.z;
+      w.terrain = w.terrain.filter((o) => o !== node);
+      w.terrainVersion++;
+      clearFields();
+    }
+    pay(w, d.cost);
+    w.buildings.push({
+      id: 'b' + ++w.serial,
+      kind: k,
+      x,
+      z,
+      hp: d.hp,
+      maxHp: d.hp,
+      cool: 0,
+      angle: 0,
+      level: 1,
+      branch: '',
+    });
+    return '';
+  }
+  if (c.type === 'upgrade') {
+    const b = w.buildings.find((b) => b.id === c.id);
+    if (!b) return 'เลือกอาคารก่อน';
+    const err = upgradeError(w, p, b, c.branch || '');
+    if (err) return err;
+    pay(w, upgradeCost(b));
+    b.level++;
+    if (b.kind === 'keep') {
+      b.maxHp += 500;
+      b.hp = b.maxHp;
+      w.notice = `ฐานแม่ระดับ ${b.level} · สร้างได้ไกลขึ้นและปลดล็อกสิ่งก่อสร้างใหม่`;
+      return '';
+    }
+    b.branch = c.branch!;
+    b.maxHp *= b.kind === 'house' ? 1.3 : 1.65;
+    b.hp = b.maxHp;
+    return '';
+  }
+  return '';
+}
+export function startWave(w: World) {
+  w.phase = 'battle';
+  w.wave++;
+  w.timer = 0;
+  w.left = Math.round((9 + w.wave * 5) * (1 + 0.45 * (w.players.length - 1)));
+  w.spawn = 0.2;
+  w.notice =
+    w.wave % 5 === 0 ? 'ระวัง! ผู้ทำลายฐานกำลังมา' : 'ศัตรูกำลังบุก ปกป้องเปลวไฟ!';
+}
+export function income(w: World): Cost {
+  const out: Cost = { gold: 20 };
+  for (const b of w.buildings) {
+    if (b.kind === 'farm') out.food = (out.food || 0) + 10 * b.level;
+    else if (b.kind === 'goldmine') out.gold = (out.gold || 0) + 20 * b.level;
+    else if (b.kind === 'quarry') out.stone = (out.stone || 0) + 12 * b.level;
+    else if (b.kind === 'mine') out.iron = (out.iron || 0) + 8 * b.level;
+    else if (b.kind === 'sawmill') {
+      const trees = w.terrain.filter(
+        (o) => o.kind === 'tree' && dist(o, b) < 6,
+      ).length;
+      out.wood = (out.wood || 0) + Math.min(3, trees) * 4 * b.level;
+    }
+  }
+  return out;
+}
+export function costText(c: Cost) {
+  return RESOURCE_ORDER.filter((k) => c[k])
+    .map((k) => `${RESOURCES[k].short} ${c[k]}`)
+    .join(' · ');
 }
 const fields = new Map<string, Int16Array>();
 function waypoint(
-  map: MapId,
+  w: World,
   from: { x: number; z: number },
   target: { x: number; z: number },
 ) {
-  const obs = obstacles(map);
+  const obs = w.terrain;
   const tx = Math.max(-23, Math.min(23, Math.round(target.x))),
     tz = Math.max(-23, Math.min(23, Math.round(target.z)));
-  const key = map + ':' + tx + ':' + tz;
+  const key = w.map + ':' + w.terrainVersion + ':' + tx + ':' + tz;
   const size = 49,
     index = (x: number, z: number) => (z + 24) * size + x + 24;
   let field = fields.get(key);
@@ -264,153 +685,6 @@ function waypoint(
     return target;
   return best;
 }
-export function newWorld(map: MapId): World {
-  return {
-    run: crypto.randomUUID(),
-    map,
-    phase: 'prep',
-    wave: 0,
-    timer: 40,
-    elapsed: 0,
-    gold: 115,
-    kills: 0,
-    players: [],
-    enemies: [],
-    buildings: [
-      {
-        id: 'keep',
-        kind: 'keep',
-        x: 0,
-        z: 0,
-        hp: 1000,
-        maxHp: 1000,
-        cool: 0,
-        angle: 0,
-        level: 1,
-        branch: '',
-      },
-    ],
-    effects: [],
-    gems: [],
-    left: 0,
-    spawn: 0,
-    serial: 0,
-    acks: {},
-    notice: 'สร้างแนวป้องกันก่อนเริ่ม Wave แรก',
-  };
-}
-export function addPlayer(w: World, profile: Profile, weapon: Weapon) {
-  if (w.players.some((p) => p.id === profile.id)) return;
-  const i = w.players.length;
-  w.players.push({
-    id: profile.id,
-    name: profile.name || 'ผู้พิทักษ์',
-    x: 2 + i,
-    z: 3,
-    hp: 100 + profile.vitality * 15,
-    maxHp: 100 + profile.vitality * 15,
-    cool: 0,
-    angle: 0,
-    weapon,
-    dead: 0,
-    level: 1,
-    xp: 0,
-    picks: 0,
-    power: 1 + profile.power * 0.08,
-    haste: 1,
-    lastHit: 0,
-    color: COLORS[i % 4],
-    unlocks: profile.unlocks,
-  });
-}
-export function canBuild(w: World, kind: BuildKind, x: number, z: number) {
-  const r = kind === 'wall' ? 0.7 : 1.05;
-  if (
-    !Number.isFinite(x) ||
-    !Number.isFinite(z) ||
-    Math.abs(x) > 22 ||
-    Math.abs(z) > 22
-  )
-    return false;
-  return (
-    !w.buildings.some(
-      (b) =>
-        dist(b, { x, z }) <
-        (b.kind === 'keep' ? 2.6 : b.kind === 'wall' ? 0.8 : 1.1) + r,
-    ) && !obstacles(w.map).some((o) => dist(o, { x, z }) < o.r + r)
-  );
-}
-export function command(w: World, pid: string, c: Command): string {
-  const p = w.players.find((p) => p.id === pid);
-  if (!p || w.phase === 'over') return 'รอบจบแล้ว';
-  if (c.type === 'next') {
-    if (w.phase === 'prep') startWave(w);
-    return '';
-  }
-  if (c.type === 'perk') {
-    if (p.picks < 1) return 'ยังไม่มีพรให้เลือก';
-    if (c.branch === 'power') p.power += 0.2;
-    else if (c.branch === 'haste') p.haste += 0.12;
-    else if (c.branch === 'vitality') {
-      p.maxHp += 25;
-      p.hp = Math.min(p.maxHp, p.hp + 50);
-    } else return 'พรไม่ถูกต้อง';
-    p.picks--;
-    return '';
-  }
-  if (w.phase !== 'prep') return 'สร้างและอัปเกรดได้ในช่วงพัก';
-  if (c.type === 'build') {
-    const k = c.kind;
-    if (!k || !Object.hasOwn(BUILDINGS, k)) return 'ไม่พบสิ่งก่อสร้าง';
-    if ((k === 'frost' || k === 'shrine') && !p.unlocks.includes(k))
-      return 'ยังไม่ได้ปลดล็อก';
-    const d = BUILDINGS[k];
-    const x = Math.round((c.x ?? 999) * 2) / 2,
-      z = Math.round((c.z ?? 999) * 2) / 2;
-    if (w.gold < d.cost) return 'เหรียญไม่พอ';
-    if (!canBuild(w, k, x, z)) return 'พื้นที่นี้วางไม่ได้';
-    if (w.buildings.length >= 90) return 'ฐานมีสิ่งก่อสร้างเต็มแล้ว';
-    w.gold -= d.cost;
-    w.buildings.push({
-      id: 'b' + ++w.serial,
-      kind: k,
-      x,
-      z,
-      hp: d.hp,
-      maxHp: d.hp,
-      cool: 0,
-      angle: 0,
-      level: 1,
-      branch: '',
-    });
-    return '';
-  }
-  if (c.type === 'upgrade') {
-    const b = w.buildings.find((b) => b.id === c.id);
-    if (!b || b.kind === 'keep') return 'เลือกอาคารก่อน';
-    if (dist(p, b) > 5) return 'เดินเข้าใกล้อาคารก่อน';
-    if (b.level >= 3) return 'อัปเกรดเต็มแล้ว';
-    if (!['rapid', 'heavy'].includes(c.branch || '')) return 'เลือกสายอัปเกรด';
-    const cost = Math.round(BUILDINGS[b.kind].cost * (b.level === 1 ? 1 : 1.6));
-    if (w.gold < cost) return 'เหรียญไม่พอ';
-    w.gold -= cost;
-    b.level++;
-    b.branch = c.branch!;
-    b.maxHp *= 1.65;
-    b.hp = b.maxHp;
-    return '';
-  }
-  return '';
-}
-export function startWave(w: World) {
-  w.phase = 'battle';
-  w.wave++;
-  w.timer = 0;
-  w.left = Math.round((9 + w.wave * 5) * (1 + 0.45 * (w.players.length - 1)));
-  w.spawn = 0.2;
-  w.notice =
-    w.wave % 5 === 0 ? 'ระวัง! ผู้ทำลายฐานกำลังมา' : 'ศัตรูกำลังบุก ปกป้องเปลวไฟ!';
-}
 function emit(
   w: World,
   a: { x: number; z: number },
@@ -433,7 +707,7 @@ function move(
   dz: number,
   speed: number,
   dt: number,
-  obs: { x: number; z: number; r: number }[],
+  obs: Obstacle[],
   buildings: Building[],
   enemy = false,
 ) {
@@ -466,10 +740,18 @@ function move(
   }
   u.angle = Math.atan2(dx, dz);
 }
+function levelUp(p: Player, xp: number) {
+  p.xp += xp;
+  while (p.xp >= p.level * 22) {
+    p.xp -= p.level * 22;
+    p.level++;
+    p.picks++;
+  }
+}
 export function step(w: World, inputs: Record<string, Input>, dt: number) {
   if (w.phase === 'over') return;
   dt = Math.min(dt, 0.05);
-  const obs = obstacles(w.map);
+  const obs = w.terrain;
   for (const p of w.players) {
     const input = inputs[p.id] || { x: 0, z: 0, commands: [] };
     for (const c of input.commands || []) {
@@ -488,15 +770,61 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
       }
       continue;
     }
-    move(p, input.x, input.z, 5.5, dt, obs, w.buildings);
+    move(p, input.x, input.z, 5.5, dt, w.terrain, w.buildings);
     p.cool -= dt;
     p.lastHit += dt;
     if (p.lastHit > 4) p.hp = Math.min(p.maxHp, p.hp + dt * 4);
   }
   w.effects = w.effects.filter((e) => (e.life -= dt) > 0);
+  const strained = workersUsed(w) > workerCap(w);
+  for (const p of w.players) {
+    if (p.dead > 0) continue;
+    const range = p.weapon === 'sword' ? 2.2 : p.weapon === 'bow' ? 8 : 6.5;
+    const e = w.enemies
+      .filter((e) => e.hp > 0 && dist(p, e) <= range)
+      .sort((a, b) => dist(p, a) - dist(p, b))[0];
+    if (e) {
+      p.task = '';
+      if (p.cool <= 0) {
+        p.cool =
+          (p.weapon === 'bow' ? 0.55 : p.weapon === 'sword' ? 0.65 : 1.05) /
+          p.haste;
+        p.angle = Math.atan2(e.x - p.x, e.z - p.z);
+        const damage =
+          (p.weapon === 'sword' ? 30 : p.weapon === 'bow' ? 20 : 26) * p.power;
+        for (const target of w.enemies) {
+          if (
+            target === e ||
+            (p.weapon === 'sword' && dist(p, target) < 2.3) ||
+            (p.weapon === 'staff' && dist(e, target) < 2.1)
+          )
+            target.hp -= damage;
+        }
+        emit(w, p, e, p.weapon);
+      }
+      continue;
+    }
+    const tree = w.terrain.find(
+      (o) => o.kind === 'tree' && dist(o, p) < o.r + 1.1,
+    );
+    p.task = tree ? 'chop' : '';
+    if (tree && p.cool <= 0) {
+      p.cool = 0.9 / p.haste;
+      p.angle = Math.atan2(tree.x - p.x, tree.z - p.z);
+      const got = Math.min(5, tree.wood);
+      tree.wood -= got;
+      w.res.wood += got;
+      emit(w, p, tree, 'chop');
+      if (tree.wood <= 0) {
+        w.terrain = w.terrain.filter((o) => o !== tree);
+        w.terrainVersion++;
+        clearFields();
+        p.task = '';
+      }
+    }
+  }
   if (w.phase === 'prep') {
-    w.timer -= dt;
-    if (w.timer <= 0) startWave(w);
+    w.timer += dt;
     return;
   }
   w.elapsed += dt;
@@ -552,30 +880,6 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     });
     w.left--;
   }
-  for (const p of w.players) {
-    if (p.dead > 0) continue;
-    const range = p.weapon === 'sword' ? 2.2 : p.weapon === 'bow' ? 8 : 6.5;
-    const e = w.enemies
-      .filter((e) => e.hp > 0 && dist(p, e) <= range)
-      .sort((a, b) => dist(p, a) - dist(p, b))[0];
-    if (e && p.cool <= 0) {
-      p.cool =
-        (p.weapon === 'bow' ? 0.55 : p.weapon === 'sword' ? 0.65 : 1.05) /
-        p.haste;
-      p.angle = Math.atan2(e.x - p.x, e.z - p.z);
-      const damage =
-        (p.weapon === 'sword' ? 30 : p.weapon === 'bow' ? 20 : 26) * p.power;
-      for (const target of w.enemies) {
-        if (
-          target === e ||
-          (p.weapon === 'sword' && dist(p, target) < 2.3) ||
-          (p.weapon === 'staff' && dist(e, target) < 2.1)
-        )
-          target.hp -= damage;
-      }
-      emit(w, p, e, p.weapon);
-    }
-  }
   for (const b of w.buildings) {
     b.cool -= dt;
     if (b.kind === 'shrine') {
@@ -584,16 +888,28 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
           p.hp = Math.min(p.maxHp, p.hp + dt * 5 * b.level);
       continue;
     }
-    if (!['keep', 'tower', 'frost'].includes(b.kind) || b.cool > 0) continue;
-    const range = b.kind === 'keep' ? 5 : b.branch === 'heavy' ? 9 : 7;
+    if (!['keep', 'tower', 'frost', 'ballista'].includes(b.kind) || b.cool > 0)
+      continue;
+    const range =
+      b.kind === 'keep'
+        ? 5
+        : b.kind === 'ballista'
+          ? b.branch === 'heavy'
+            ? 13
+            : 11
+          : b.branch === 'heavy'
+            ? 9
+            : 7;
     const e = w.enemies
       .filter((e) => e.hp > 0 && dist(b, e) < range)
       .sort((a, c) => dist(b, a) - dist(b, c))[0];
     if (e) {
       b.cool =
-        (b.kind === 'keep' ? 1.4 : 0.95) / (b.branch === 'rapid' ? 1.8 : 1);
+        ((b.kind === 'keep' ? 1.4 : b.kind === 'ballista' ? 2.2 : 0.95) /
+          (b.branch === 'rapid' ? 1.8 : 1)) *
+        (strained && b.kind !== 'keep' ? 1.75 : 1);
       const dmg =
-        (b.kind === 'keep' ? 14 : 18) *
+        (b.kind === 'keep' ? 14 : b.kind === 'ballista' ? 45 : 18) *
         b.level *
         (b.branch === 'heavy' ? 1.8 : 1);
       e.hp -= dmg;
@@ -603,8 +919,16 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
             ee.slow = 2;
             ee.hp -= dmg * 0.4;
           }
+      } else if (b.kind === 'ballista') {
+        for (const ee of w.enemies)
+          if (ee !== e && dist(e, ee) < 1.6) ee.hp -= dmg * 0.5;
       }
-      emit(w, b, e, b.kind === 'frost' ? 'staff' : 'arrow');
+      emit(
+        w,
+        b,
+        e,
+        b.kind === 'frost' ? 'staff' : b.kind === 'ballista' ? 'bolt' : 'arrow',
+      );
     }
   }
   for (const e of w.enemies) {
@@ -626,7 +950,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
           : 1.8
         : 1.1;
     if (dist(e, target) > attackRange) {
-      const goal = waypoint(w.map, e, target);
+      const goal = waypoint(w, e, target);
       move(
         e,
         goal.x - e.x,
@@ -646,7 +970,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
   }
   for (const e of w.enemies.filter((e) => e.hp <= 0)) {
     w.kills++;
-    w.gold += e.kind === 'boss' ? 30 : 2;
+    w.res.gold += e.kind === 'boss' ? 30 : 2;
     w.gems.push({
       id: ++w.serial,
       x: e.x,
@@ -662,14 +986,7 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
   for (const g of w.gems) {
     const p = w.players.find((p) => p.dead <= 0 && dist(p, g) < 3);
     if (p) {
-      for (const pp of w.players) {
-        pp.xp += g.value;
-        while (pp.xp >= pp.level * 22) {
-          pp.xp -= pp.level * 22;
-          pp.level++;
-          pp.picks++;
-        }
-      }
+      for (const pp of w.players) levelUp(pp, g.value);
       g.value = 0;
     }
   }
@@ -685,32 +1002,23 @@ export function step(w: World, inputs: Record<string, Input>, dt: number) {
     w.notice = 'เปลวไฟดับลง แต่การเดินทางยังไม่จบ';
     return;
   }
+  const before = w.buildings.length;
   w.buildings = w.buildings.filter((b) => b.hp > 0);
+  if (w.buildings.length < before && workersUsed(w) > workerCap(w))
+    w.notice = 'บ้านคนงานถูกทำลาย ป้อมทำงานช้าลงจนกว่าจะสร้างบ้านใหม่';
   if (w.left === 0 && w.enemies.length === 0) {
     w.phase = 'prep';
-    w.timer = 30;
-    const income =
-      25 +
-      w.buildings
-        .filter((b) => b.kind === 'farm')
-        .reduce((s, b) => s + 18 * b.level, 0);
-    w.gold += income;
+    w.timer = 0;
+    const gain = income(w);
+    for (const k of Object.keys(gain) as Resource[]) w.res[k] += gain[k] || 0;
     for (const b of w.buildings) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.2);
     for (const p of w.players) {
       p.dead = 0;
       p.hp = p.maxHp;
     }
-    for (const g of w.gems)
-      for (const p of w.players) {
-        p.xp += g.value;
-        while (p.xp >= p.level * 22) {
-          p.xp -= p.level * 22;
-          p.level++;
-          p.picks++;
-        }
-      }
+    for (const g of w.gems) for (const p of w.players) levelUp(p, g.value);
     w.gems = [];
-    w.notice = 'รอดแล้ว! +' + income + ' เหรียญ · ซ่อมฐานและเลือกพร';
+    w.notice = 'รอดแล้ว! +' + costText(gain) + ' · ซ่อมฐานและเลือกพร';
   }
 }
 export function reward(w: World) {

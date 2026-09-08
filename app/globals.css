@@ -765,7 +765,7 @@ input {
 }
 .top-hud {
   position: absolute;
-  top: 88px;
+  top: 118px;
   left: 28px;
   right: 28px;
   display: flex;
@@ -818,6 +818,105 @@ input {
   width: 100%;
   text-align: right;
   color: #b8c9b5;
+}
+.keep-level {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #ffda87;
+  text-shadow: 0 2px 5px #0008;
+}
+.keep-level b {
+  font-size: 22px;
+}
+.keep-level small {
+  font-size: 10px;
+  color: #b8c9b5;
+}
+.resource-bar {
+  position: absolute;
+  top: 74px;
+  left: 28px;
+  right: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+}
+.resource-bar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #0f1c1ccc;
+  border: 1px solid #ffffff1a;
+  font-size: 12px;
+  color: #e8e2cc;
+}
+.resource-bar > span svg {
+  color: #d9c58a;
+}
+.resource-bar > span.strain {
+  border-color: #e68272;
+  color: #ffb3a6;
+}
+.resource-bar > span.strain svg {
+  color: #e68272;
+}
+.cost-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cost-chips i {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-style: normal;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #ffffff0f;
+  color: #f2c36d;
+}
+.cost-chips i.short {
+  color: #ff9d8f;
+  background: #e6827222;
+}
+.worker-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #a9c3c9;
+  margin-left: 6px;
+}
+.build-options b .tier {
+  font-size: 10px;
+  color: #a9c3c9;
+  letter-spacing: 1px;
+}
+.build-options > button:disabled {
+  opacity: 0.55;
+}
+.build-options strong {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.perk-options.one {
+  grid-template-columns: 1fr;
+}
+.lock-reason {
+  color: #ff9d8f !important;
+}
+.hero-status .chopping {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-style: normal;
+  color: #d9c58a;
 }
 .keep-health {
   position: absolute;
@@ -1074,6 +1173,7 @@ input {
   font-size: 14px;
 }
 .game-sheet {
+  translate: none !important;
   background: #172426 !important;
   position: fixed !important;
   top: auto !important;
@@ -1358,7 +1458,7 @@ input {
   .top-hud {
     left: 20px;
     right: 20px;
-    top: 102px;
+    top: 138px;
   }
   .wave-label strong b {
     font-size: 34px;
@@ -1376,14 +1476,27 @@ input {
     top: 69px;
     width: calc(100% - 40px);
   }
+  .resource-bar {
+    top: 98px;
+    left: 20px;
+    right: 20px;
+    gap: 4px;
+  }
+  .resource-bar > span {
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+  .keep-level b {
+    font-size: 20px;
+  }
   .minimap {
-    top: 203px;
+    top: 240px;
     right: 20px;
     width: 74px;
     height: 74px;
   }
   .team-tags {
-    top: 289px;
+    top: 326px;
     right: 20px;
     max-width: 115px;
   }
