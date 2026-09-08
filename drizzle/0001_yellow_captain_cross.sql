@@ -1,0 +1,1 @@
+CREATE INDEX `idx_rewards_profile_claimed` ON `rewards` (`profile`,`claimed`);

@@ -1,0 +1,45 @@
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+export const profiles = sqliteTable('profiles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  points: integer('points').notNull().default(0),
+  power: integer('power').notNull().default(0),
+  vitality: integer('vitality').notNull().default(0),
+  unlocks: text('unlocks').notNull().default('[]'),
+  best: integer('best').notNull().default(0),
+});
+export const rooms = sqliteTable(
+  'rooms',
+  {
+    code: text('code').primaryKey(),
+    host: text('host').notNull(),
+    name: text('name').notNull(),
+    map: text('map').notNull(),
+    status: text('status').notNull().default('lobby'),
+    snapshot: text('snapshot'),
+    updated: integer('updated').notNull(),
+  },
+  (t) => [index('idx_rooms_status_updated').on(t.status, t.updated)],
+);
+export const members = sqliteTable(
+  'members',
+  {
+    id: text('id').primaryKey(),
+    room: text('room').notNull(),
+    weapon: text('weapon').notNull(),
+    input: text('input').notNull().default('{}'),
+    updated: integer('updated').notNull(),
+  },
+  (t) => [index('idx_members_room_updated').on(t.room, t.updated)],
+);
+export const rewards = sqliteTable(
+  'rewards',
+  {
+    id: text('id').primaryKey(),
+    profile: text('profile').notNull(),
+    points: integer('points').notNull(),
+    wave: integer('wave').notNull(),
+    claimed: integer('claimed').notNull().default(0),
+  },
+  (t) => [index('idx_rewards_profile_claimed').on(t.profile, t.claimed)],
+);
