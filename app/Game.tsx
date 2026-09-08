@@ -37,13 +37,9 @@ import {
   RotateCcw,
   RotateCw,
 } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+import { Dialog, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { screenDirection } from '@/lib/game/art';
 import { GameScene } from '@/lib/game/scene';
 import {
   World,
@@ -80,6 +76,7 @@ import {
   following,
   UNITS,
 } from '@/lib/game/engine';
+import { EmberDialogContent } from '@/components/EmberDialog';
 import { api } from '@/lib/game/api';
 export type Session = {
   world: World;
@@ -284,6 +281,9 @@ export default function Game({
         input.current.z =
           Number(keys.has('s') || keys.has('arrowdown')) -
           Number(keys.has('w') || keys.has('arrowup'));
+        const direction = screenDirection(input.current.x, input.current.z);
+        input.current.x = direction.x;
+        input.current.z = direction.z;
       }
     };
     const kd = (e: KeyboardEvent) => key(e, true),
@@ -468,8 +468,12 @@ export default function Game({
       dy = e.clientY - ptr.y,
       len = Math.hypot(dx, dy),
       scale = Math.min(1, len / 45);
-    input.current.x = len > 6 ? (dx / len) * scale : 0;
-    input.current.z = len > 6 ? (dy / len) * scale : 0;
+    const direction = screenDirection(
+      len > 6 ? (dx / len) * scale : 0,
+      len > 6 ? (dy / len) * scale : 0,
+    );
+    input.current.x = direction.x;
+    input.current.z = direction.z;
     setJoystick({
       x: ptr.x,
       y: ptr.y,
@@ -873,7 +877,7 @@ export default function Game({
           if (!open) openPanel('');
         }}
       >
-        <DialogContent
+        <EmberDialogContent
           className="game-sheet"
           showCloseButton={panel !== 'perk'}
         >
@@ -1068,10 +1072,10 @@ export default function Game({
               </button>
             </>
           )}
-        </DialogContent>
+        </EmberDialogContent>
       </Dialog>
       <Dialog open={quit} onOpenChange={setQuit}>
-        <DialogContent className="ember-dialog">
+        <EmberDialogContent className="ember-dialog">
           <DialogTitle>ออกจากรอบนี้?</DialogTitle>
           <DialogDescription>
             {session.room?.host
@@ -1084,10 +1088,10 @@ export default function Game({
           <button className="secondary" onClick={() => setQuit(false)}>
             เล่นต่อ
           </button>
-        </DialogContent>
+        </EmberDialogContent>
       </Dialog>
       <Dialog open={hud.phase === 'over'}>
-        <DialogContent
+        <EmberDialogContent
           className="ember-dialog result-dialog"
           showCloseButton={false}
         >
@@ -1157,7 +1161,7 @@ export default function Game({
               กลับค่ายโดยไม่บันทึก
             </button>
           )}
-        </DialogContent>
+        </EmberDialogContent>
       </Dialog>
       {toast && (
         <output key={toast} className="game-toast">

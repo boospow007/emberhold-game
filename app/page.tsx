@@ -25,12 +25,8 @@ import {
   Trash2,
   Play,
 } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+import { Dialog, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { EmberDialogContent } from '@/components/EmberDialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   api,
@@ -629,7 +625,7 @@ export default function Home() {
           }
         }}
       >
-        <DialogContent
+        <EmberDialogContent
           className="ember-dialog lobby-dialog"
           showCloseButton={!room}
         >
@@ -820,7 +816,7 @@ export default function Home() {
               {error}
             </p>
           )}
-        </DialogContent>
+        </EmberDialogContent>
       </Dialog>
       <Dialog
         open={modal === 'camp'}
@@ -828,7 +824,7 @@ export default function Home() {
           if (!open) setModal('');
         }}
       >
-        <DialogContent className="ember-dialog camp-dialog">
+        <EmberDialogContent className="ember-dialog camp-dialog">
           <DialogTitle>ค่ายพักแห่งเปลวไฟ</DialogTitle>
           <DialogDescription>การพัฒนาเหล่านี้อยู่กับคุณในรอบต่อไป</DialogDescription>
           <div className="camp-points">
@@ -944,7 +940,7 @@ export default function Home() {
             ความก้าวหน้าผูกกับเบราว์เซอร์นี้ ไม่ต้องสมัครบัญชี
           </p>
           {error && <p className="inline-error">{error}</p>}
-        </DialogContent>
+        </EmberDialogContent>
       </Dialog>
     </main>
   );

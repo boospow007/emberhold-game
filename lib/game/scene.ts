@@ -1,4 +1,5 @@
 import * as T from 'three';
+import { ART, ComicArt, softenBox, screenDirection, ISO_ANGLE } from './art';
 import {
   World,
   MAPS,
@@ -18,11 +19,13 @@ import {
 } from './terrain.ts';
 export class GameScene {
   scene = new T.Scene();
-  camera = new T.PerspectiveCamera(42, 1, 0.1, 260);
+  camera = new T.OrthographicCamera(-16, 16, 24, -24, 0.1, 260);
+  art = new ComicArt();
+  reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   renderer: T.WebGLRenderer;
   root: T.Group;
   entities = new Map<string, T.Group>();
-  materials = new Map<number, T.MeshStandardMaterial>();
+  materials = new Map<number, T.MeshToonMaterial>();
   ray = new T.Raycaster();
   plane = new T.Plane(new T.Vector3(0, 1, 0), 0);
   ghost: T.Group | null = null;
@@ -94,15 +97,21 @@ export class GameScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = T.PCFSoftShadowMap;
     this.renderer.outputColorSpace = T.SRGBColorSpace;
-    this.renderer.toneMapping = T.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.2;
+    this.renderer.toneMapping = T.LinearToneMapping;
+    this.renderer.toneMappingExposure = 1;
     container.appendChild(this.renderer.domElement);
     const colors = MAPS[map];
     this.scene.background = new T.Color(colors.sky);
     this.scene.fog = new T.Fog(colors.sky, 60, 150);
-    this.hemi = new T.HemisphereLight(0xffeac4, 0x496579, 2.5);
+    this.hemi = new T.HemisphereLight(0xfff0cc, 0x767071, 2.0);
     this.scene.add(this.hemi);
-    this.skyDay.setHex(colors.sky);
+    this.skyDay.setHex(
+      world.map === 'forest'
+        ? 0xc4c58c
+        : world.map === 'desert'
+          ? 0xdac495
+          : 0xb6c8c4,
+    );
     this.skyNight
       .setHex(colors.sky)
       .multiplyScalar(0.45)
@@ -110,7 +119,10 @@ export class GameScene {
     const sun = new T.DirectionalLight(0xffe3ab, 3.5);
     sun.position.set(-16, 30, 12);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(
+      window.innerWidth < 700 ? 1024 : 2048,
+      window.innerWidth < 700 ? 1024 : 2048,
+    );
     Object.assign(sun.shadow.camera, {
       left: -40,
       right: 40,
@@ -125,6 +137,7 @@ export class GameScene {
     this.root = new T.Group();
     this.scene.add(this.root, this.effects, this.gemGroup, this.smokeGroup);
     this.buildGround(world);
+    this.buildPlaza();
     this.map = map;
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -133,17 +146,13 @@ export class GameScene {
   mat(color: number) {
     let m = this.materials.get(color);
     if (!m) {
-      m = new T.MeshStandardMaterial({
-        color,
-        roughness: 0.9,
-        flatShading: true,
-      });
+      m = this.art.material(color);
       this.materials.set(color, m);
     }
     return m;
   }
   box(w: number, h: number, d: number, c: number) {
-    const m = new T.Mesh(new T.BoxGeometry(w, h, d), this.mat(c));
+    const m = new T.Mesh(softenBox(w, h, d), this.mat(c));
     m.castShadow = true;
     m.receiveShadow = true;
     return m;
@@ -152,8 +161,12 @@ export class GameScene {
     this.width = this.container.clientWidth;
     this.height = this.container.clientHeight;
     this.renderer.setSize(this.width, this.height);
-    this.camera.aspect = this.width / this.height;
-    this.camera.fov = this.width / this.height < 0.75 ? 48 : 42;
+    const aspect = this.width / Math.max(1, this.height);
+    const span = aspect < 0.8 ? 36 : 42;
+    this.camera.left = (-span * aspect) / 2;
+    this.camera.right = (span * aspect) / 2;
+    this.camera.top = span / 2;
+    this.camera.bottom = -span / 2;
     this.camera.updateProjectionMatrix();
   }
   buildGround(world: World) {
@@ -166,13 +179,19 @@ export class GameScene {
     const col = new Float32Array(pos.count * 3);
     const c = new T.Color();
     const sand = new T.Color(world.map === 'snow' ? 0xc5d3d6 : 0xd6c58f),
-      plain = new T.Color(colors.ground),
+      plain = new T.Color(
+        world.map === 'forest'
+          ? ART.grass
+          : world.map === 'desert'
+            ? 0xc9aa66
+            : 0xb6c8c4,
+      ),
       hill = new T.Color(
         world.map === 'desert'
           ? 0x8f7a58
           : world.map === 'snow'
             ? 0x8ea3a6
-            : 0x6f8a63,
+            : 0x8d9750,
       ),
       rock = new T.Color(world.map === 'desert' ? 0x6e5847 : 0x5f6b6d),
       peak = new T.Color(world.map === 'desert' ? 0x8a705b : 0xe6eef0);
@@ -202,10 +221,9 @@ export class GameScene {
     geo.computeVertexNormals();
     const mesh = new T.Mesh(
       geo,
-      new T.MeshStandardMaterial({
+      new T.MeshToonMaterial({
         vertexColors: true,
-        roughness: 0.95,
-        flatShading: true,
+        gradientMap: this.art.gradient,
       }),
     );
     mesh.receiveShadow = true;
@@ -238,7 +256,7 @@ export class GameScene {
             ? 0xb9cdc9
             : world.map === 'desert'
               ? 0xb9a26a
-              : 0x6f9a62,
+              : 0xb3bd5d,
         roughness: 1,
         flatShading: true,
       }),
@@ -275,6 +293,147 @@ export class GameScene {
     rim.position.y = -2.2;
     this.root.add(rim);
   }
+  buildPlaza() {
+    const patch = (w: number, d: number, x: number, z: number, c: number) => {
+      const m = this.box(w, 0.035, d, c);
+      m.position.set(x, this.y(x, z) + 0.025, z);
+      m.castShadow = false;
+      this.root.add(m);
+    };
+    patch(12, 12, 0, 0, ART.asphalt);
+    patch(7.2, 7.2, 0, 0, ART.plaster);
+    for (let i = -4; i <= 4; i += 2) {
+      patch(0.12, 1, 4.5, i, ART.ochre);
+      patch(0.12, 1, -4.5, i, ART.ochre);
+      patch(1, 0.12, i, 4.5, ART.ochre);
+      patch(1, 0.12, i, -4.5, ART.ochre);
+    }
+    for (let i = 0; i < 18; i++) {
+      const x = Math.sin(i * 7.3) * 5.5,
+        z = Math.cos(i * 4.1) * 5.5;
+      if (Math.hypot(x, z) < 2.8) continue;
+      patch(0.4 + (i % 3) * 0.2, 0.28, x, z, i % 2 ? 0x9a8f7a : 0xb3a38a);
+    }
+  }
+  refuge(level: number) {
+    const g = new T.Group();
+    const put = (
+      w: number,
+      h: number,
+      d: number,
+      x: number,
+      y: number,
+      z: number,
+      c: number,
+    ) => {
+      const m = this.box(w, h, d, c);
+      m.position.set(x, y, z);
+      g.add(m);
+      return m;
+    };
+    put(3.9, 0.24, 3.7, 0, 0.12, 0, 0xc6b59b);
+    put(3.3, 2.3, 2.9, 0, 1.37, 0, 0xe7ba59);
+    put(3.7, 0.18, 3.3, 0, 2.59, 0, 0xb7aba1);
+    put(3.6, 0.32, 0.13, 0, 2.8, -1.55, 0xc7bfb0);
+    put(0.13, 0.32, 3.1, 1.72, 2.8, 0, 0xc7bfb0);
+    put(0.13, 0.32, 3.1, -1.72, 2.8, 0, 0xc7bfb0);
+    put(3.5, 0.16, 0.65, 0, 2.24, 1.64, ART.ochre).rotation.x = 0.12;
+    for (const x of [-1.48, 1.48]) put(0.1, 2.05, 0.1, x, 1.17, 1.92, 0x5d6761);
+    for (const x of [-0.95, 0.96]) {
+      put(0.92, 1.37, 0.075, x, 1.18, 1.48, 0x344b50);
+      put(0.79, 1.22, 0.045, x, 1.19, 1.53, 0x73999a);
+      const board = put(1.03, 0.16, 0.06, x, 0.96, 1.58, 0xb28757);
+      board.rotation.z = x > 0 ? -0.36 : 0.25;
+    }
+    put(0.58, 1.72, 0.085, 0, 1.03, 1.5, 0x684d3b);
+    put(0.04, 0.04, 0.07, 0.18, 1, 1.57, 0xf3d88c);
+    for (let i = 0; i < 5; i++)
+      put(0.08, 1.1, 0.035, -0.95 + i * 0.17, 1.17, 1.56, 0x53676a);
+    for (const z of [-0.65, 0.65]) {
+      put(0.04, 1, 0.7, 1.67, 1.28, z, 0x567d7d);
+      put(0.055, 0.09, 0.82, 1.69, 1.27, z, 0x32474a);
+    }
+    // Roof sign, air-conditioning box, antenna and a flame beacon.
+    put(2.7, 1.45, 0.22, -0.12, 3.56, 0.05, 0xc78038);
+    const sign = this.art.sign('EMBER', 2.6, 1.1);
+    sign.position.set(-0.12, 3.63, 0.173);
+    g.add(sign);
+    put(2.76, 0.1, 0.29, -0.12, 4.32, 0.05, ART.rust);
+    put(0.65, 0.4, 0.62, 0.9, 2.92, -0.72, 0x8c9c9a);
+    const fan = new T.Mesh(
+      new T.CylinderGeometry(0.24, 0.24, 0.05, 12),
+      this.mat(0x405552),
+    );
+    fan.position.set(0.9, 3.15, -0.72);
+    g.add(fan);
+    for (let i = 0; i < 4; i++) {
+      const fin = put(0.7, 0.04, 0.03, 0.9, 3.18, -0.72, 0x272f2b);
+      fin.rotation.y = (i * Math.PI) / 4;
+    }
+    put(0.06, 1.3, 0.06, -1.2, 3.3, -1, 0x545a50);
+    put(0.7, 0.035, 0.035, -1.2, 3.8, -1, 0x545a50);
+    const chimney = put(0.32, 0.62, 0.32, 1.12, 2.99, 0.79, 0x796b57);
+    chimney.name = 'chimney';
+    const flame = new T.Mesh(new T.IcosahedronGeometry(0.32, 1), this.glowMat);
+    flame.position.set(1.12, 3.54, 0.79);
+    flame.name = 'flame';
+    g.add(flame);
+    const light = new T.PointLight(0xffbf53, 12, 12);
+    light.position.copy(flame.position);
+    light.name = 'flame-light';
+    g.add(light);
+    for (let i = 0; i < 2 + level; i++) {
+      const box = put(0.38, 0.37, 0.4, -1.6 + i * 0.42, 0.43, -1.4, 0x997a50);
+      box.rotation.y = i * 0.13;
+    }
+    g.add(this.flag(-1.55, 2.8, -1.3, ART.ochre, 0.8));
+    return g;
+  }
+  shelter(level: number) {
+    const g = new T.Group();
+    const width = 1.6 + level * 0.15,
+      height = 1.15 + level * 0.15;
+    const body = this.box(width, height, 1.6, level > 1 ? 0x799c9b : 0xb46e43);
+    body.position.y = height / 2;
+    g.add(body);
+    const roof = this.box(width + 0.25, 0.15, 1.9, 0x65949c);
+    roof.position.y = height + 0.08;
+    roof.rotation.z = 0.035;
+    g.add(roof);
+    for (let i = 0; i < 6; i++) {
+      const seam = this.box(0.045, 0.035, 1.88, 0x426775);
+      seam.position.set(-width / 2 + (i * width) / 5, height + 0.19, 0);
+      g.add(seam);
+    }
+    for (const x of [-width / 2 + 0.09, width / 2 - 0.09]) {
+      const post = this.box(0.085, height, 0.06, 0x5a5147);
+      post.position.set(x, height / 2, 0.83);
+      g.add(post);
+    }
+    const door = this.box(0.47, 0.95, 0.06, 0x3c5153);
+    door.position.set(-0.25, 0.48, 0.84);
+    g.add(door);
+    const pane = this.window(0.4, 0.4);
+    pane.position.set(0.46, 0.78, 0.85);
+    g.add(pane);
+    const plank = this.box(0.55, 0.1, 0.06, 0xbca47d);
+    plank.position.set(0.46, 0.77, 0.91);
+    plank.rotation.z = -0.3;
+    g.add(plank);
+    const hood = this.box(width + 0.12, 0.1, 0.55, 0xd2ad5d);
+    hood.position.set(0, height - 0.25, 1);
+    hood.rotation.x = 0.12;
+    g.add(hood);
+    const chimney = this.box(0.15, 0.5, 0.15, 0x595c51);
+    chimney.position.set(0.6, height + 0.2, -0.45);
+    chimney.name = 'chimney';
+    g.add(chimney);
+    const step = this.box(0.8, 0.12, 0.4, 0xbdb09c);
+    step.position.set(-0.2, 0.06, 1);
+    g.add(step);
+    return g;
+  }
+
   y(x: number, z: number) {
     return this.ground ? this.ground.y(x, z) : 0;
   }
@@ -288,18 +447,23 @@ export class GameScene {
       g.add(trunk);
       for (let j = 0; j < 3; j++) {
         const m = new T.Mesh(
-          new T.ConeGeometry(o.r * 1.5 * (1 - j * 0.17), 2, 5),
+          new T.IcosahedronGeometry(o.r * (1.08 - j * 0.09), 1),
           this.mat(
             map === 'snow'
               ? j === 2
                 ? 0xdbe5dd
                 : 0x72998e
               : j === 2
-                ? 0x436e4e
-                : 0x315b42,
+                ? 0xb6c87a
+                : 0x8da85d,
           ),
         );
-        m.position.y = 1.7 + j * 0.7;
+        m.position.set(
+          Math.sin(j * 3.7) * 0.25,
+          1.6 + j * 0.6,
+          Math.cos(j * 3.7) * 0.18,
+        );
+        m.scale.y = 1.08;
         m.castShadow = true;
         g.add(m);
       }
@@ -344,6 +508,7 @@ export class GameScene {
       let g = this.terrainMeshes.get(o.id);
       if (!g) {
         g = this.terrainMesh(o);
+        this.art.outline(g);
         g.userData.wood = o.wood;
         this.root.add(g);
         this.terrainMeshes.set(o.id, g);
@@ -393,58 +558,7 @@ export class GameScene {
   building(kind: string, branch = '', level = 1) {
     const g = new T.Group();
     if (kind === 'keep') {
-      const base = this.box(3.4, 1, 3.4, 0xa9afa0);
-      base.position.y = 0.5;
-      g.add(base);
-      const step = this.box(2.2, 0.3, 1.2, 0xb9bfae);
-      step.position.set(0, 1.05, 1.6);
-      g.add(step);
-      const body = this.box(2.3, 2.3, 2.3, 0xd1c9ad);
-      body.position.y = 1.65;
-      g.add(body);
-      const door = this.box(0.7, 1.1, 0.08, 0x4a3524);
-      door.position.set(0, 1.05, 1.18);
-      g.add(door);
-      for (const x of [-0.7, 0.7]) {
-        const win = this.window(0.32, 0.42);
-        win.position.set(x, 2.1, 1.18);
-        g.add(win);
-      }
-      for (const z of [-1.18, 1.18]) {
-        const beam = this.box(2.5, 0.16, 0.1, 0x8a6a48);
-        beam.position.set(0, 2.85, z);
-        g.add(beam);
-      }
-      const roof = new T.Mesh(
-        new T.ConeGeometry(2.05, 1.8, 4),
-        this.mat(0x335b55),
-      );
-      roof.rotation.y = Math.PI / 4;
-      roof.position.y = 3.6;
-      g.add(roof);
-      for (const x of [-1.7, 1.7])
-        for (const z of [-1.7, 1.7]) {
-          const t = this.box(0.74, 2.6, 0.74, 0xb3b7a2);
-          t.position.set(x, 1.3, z);
-          g.add(t);
-          const cap = new T.Mesh(
-            new T.ConeGeometry(0.55, 0.6, 4),
-            this.mat(0x2b4a45),
-          );
-          cap.rotation.y = Math.PI / 4;
-          cap.position.set(x, 2.9, z);
-          g.add(cap);
-          g.add(this.torch(x, 2.5, z + (z > 0 ? 0.45 : -0.45)));
-        }
-      g.add(this.flag(1.2, 4.2, -1.2, 0xf2c36d, 1.4));
-      const flame = new T.Mesh(new T.OctahedronGeometry(0.5), this.glowMat);
-      flame.position.y = 4.85;
-      flame.name = 'flame';
-      g.add(flame);
-      const light = new T.PointLight(0xffc46a, 12, 12);
-      light.position.y = 4.2;
-      light.name = 'flame-light';
-      g.add(light);
+      return this.refuge(level);
     } else if (kind === 'wall') {
       const h = 1.5 + (level - 1) * 0.3;
       const b = this.box(1.25, h, 1.25, level >= 2 ? 0x8d9294 : 0xa2aa98);
@@ -515,35 +629,7 @@ export class GameScene {
       fan.position.set(-0.9, 1.5, 1.7);
       g.add(fan);
     } else if (kind === 'house') {
-      const w = 1.3 + level * 0.15;
-      const hh = 0.9 + level * 0.25;
-      const b = this.box(w, hh, w, level >= 3 ? 0xc9c2ae : 0xd9b98a);
-      b.position.y = hh / 2;
-      g.add(b);
-      const r = new T.Mesh(
-        new T.ConeGeometry(w * 0.95, 0.9, 4),
-        this.mat(level >= 2 ? 0x8a4a3a : 0xa45c3d),
-      );
-      r.rotation.y = Math.PI / 4;
-      r.position.y = hh + 0.45;
-      g.add(r);
-      const door = this.box(0.3, 0.45, 0.06, 0x4a3524);
-      door.position.set(0, 0.23, w / 2 + 0.01);
-      g.add(door);
-      for (const x of level >= 2 ? [-0.4, 0.4] : [0.4]) {
-        const win = this.window(0.22, 0.22);
-        win.position.set(x, hh * 0.65, w / 2 + 0.02);
-        g.add(win);
-      }
-      const chimney = this.box(0.22, 0.6, 0.22, 0x7c6a5a);
-      chimney.position.set(w * 0.3, hh + 0.55, -w * 0.25);
-      chimney.name = 'chimney';
-      g.add(chimney);
-      if (level >= 3) {
-        const fence = this.box(w + 0.6, 0.25, 0.06, 0x8a6a48);
-        fence.position.set(0, 0.15, w / 2 + 0.45);
-        g.add(fence);
-      }
+      return this.shelter(level);
     } else if (kind === 'sawmill') {
       const b = this.box(1.6, 0.9, 1.3, 0x8f6b48);
       b.position.y = 0.45;
@@ -1098,7 +1184,7 @@ export class GameScene {
       0.34,
       kind === 'knight' ? 0xb7bcc4 : kind === 'archer' ? 0x6f8a63 : 0x7d8f7a,
     );
-    body.material = (body.material as T.MeshStandardMaterial).clone();
+    body.material = body.material.clone();
     body.position.y = 0.62;
     body.name = 'body';
     rider.add(body);
@@ -1244,7 +1330,7 @@ export class GameScene {
       bar.position.y = y;
       g.add(bar);
     }
-    bar.rotation.y = -g.rotation.y;
+    bar.rotation.y = ISO_ANGLE - g.rotation.y;
     bar.visible = hp < max;
     const fill = bar.getObjectByName('fill')!;
     const v = Math.max(0, hp / max);
@@ -1480,8 +1566,8 @@ export class GameScene {
     // Day / night: battles darken the sky and let the keep's flame carry the light.
     const target = w.phase === 'battle' ? 1 : 0;
     this.night += (target - this.night) * Math.min(1, dt * 1.4);
-    this.sun.intensity = 3.5 - 2.1 * this.night;
-    this.hemi.intensity = 2.5 - 1.2 * this.night;
+    this.sun.intensity = 2.3 - 1.1 * this.night;
+    this.hemi.intensity = 2.0 - 0.7 * this.night;
     const sky = this.skyDay.clone().lerp(this.skyNight, this.night);
     (this.scene.background as T.Color).copy(sky);
     (this.scene.fog as T.Fog).color.copy(sky);
@@ -1505,17 +1591,16 @@ export class GameScene {
     if (keep && keep.hp < this.lastKeepHp - 0.01) this.shakeAt = now;
     this.lastKeepHp = keep ? keep.hp : Infinity;
     const shakeT = (now - this.shakeAt) / 320;
-    const shake = shakeT < 1 ? (1 - shakeT) * 0.35 : 0;
+    const shake = !this.reducedMotion && shakeT < 1 ? (1 - shakeT) * 0.35 : 0;
     const sx = Math.sin(now * 0.09) * shake,
       sz = Math.cos(now * 0.11) * shake;
-    const mobile = this.width / this.height < 0.8;
     const py = p ? this.y(p.x, p.z) : 0;
     this.camera.position.set(
-      this.follow.x + sx,
-      py + (mobile ? 28 : 31),
-      this.follow.z + (mobile ? 23 : 25) + sz,
+      this.follow.x + 28 + sx,
+      py + 34,
+      this.follow.z + 28 + sz,
     );
-    this.camera.lookAt(this.follow.x + sx, py, this.follow.z - 2 + sz);
+    this.camera.lookAt(this.follow.x + sx, py, this.follow.z + sz);
     this.syncTerrain(w, now);
     if (this.water && this.waterBase) {
       const pos = this.water.geometry.attributes.position as T.BufferAttribute;
@@ -1544,6 +1629,7 @@ export class GameScene {
       }
       if (!g) {
         g = this.building(b.kind, b.branch, b.level);
+        this.art.outline(g);
         g.userData.key = key;
         g.userData.born = now;
         g.userData.lastHp = b.hp;
@@ -1654,6 +1740,7 @@ export class GameScene {
           !isPlayer,
           isPlayer ? u.weapon : u.kind,
         );
+        this.art.outline(g);
         g.position.set(u.x, this.y(u.x, u.z), u.z);
         this.scene.add(g);
         this.entities.set(u.id, g);
@@ -1676,7 +1763,12 @@ export class GameScene {
       g.position.x += (u.x - g.position.x) * Math.min(1, dt * 18);
       g.position.z += (u.z - g.position.z) * Math.min(1, dt * 18);
       g.position.y = this.y(g.position.x, g.position.z);
-      g.rotation.y = u.angle;
+      g.rotation.y +=
+        Math.atan2(
+          Math.sin(u.angle - g.rotation.y),
+          Math.cos(u.angle - g.rotation.y),
+        ) *
+        (1 - Math.exp(-dt * 14));
       g.visible = !isPlayer || u.dead <= 0;
       this.animateUnit(g, u, now, dt);
       if (isPlayer) {
@@ -1699,6 +1791,7 @@ export class GameScene {
         const owner = w.players.find((p) => p.id === u.owner);
         g = this.soldier(u.kind, owner ? owner.color : 0x9edca2);
         g.userData.owner = u.owner;
+        this.art.outline(g);
         g.position.set(u.x, this.y(u.x, u.z), u.z);
         this.scene.add(g);
         this.entities.set(u.id, g);
@@ -1712,7 +1805,12 @@ export class GameScene {
       g.position.x += (u.x - g.position.x) * Math.min(1, dt * 18);
       g.position.z += (u.z - g.position.z) * Math.min(1, dt * 18);
       g.position.y = this.y(g.position.x, g.position.z);
-      g.rotation.y = u.angle;
+      g.rotation.y +=
+        Math.atan2(
+          Math.sin(u.angle - g.rotation.y),
+          Math.cos(u.angle - g.rotation.y),
+        ) *
+        (1 - Math.exp(-dt * 14));
       this.animateUnit(g, u, now, dt);
       this.health(g, u.hp, u.maxHp, 1.6);
     }
@@ -1889,7 +1987,11 @@ export class GameScene {
         );
       }
       this.ghost.traverse((o) => {
-        if (o instanceof T.Mesh && o.material instanceof T.MeshStandardMaterial)
+        if (
+          o instanceof T.Mesh &&
+          (o.material instanceof T.MeshStandardMaterial ||
+            o.material instanceof T.MeshToonMaterial)
+        )
           o.material.emissive.setHex(valid ? 0x143320 : 0x661a22);
       });
     } else if (this.ghost) {
@@ -1898,6 +2000,9 @@ export class GameScene {
       this.ghost = null;
     }
     this.renderer.render(this.scene, this.camera);
+  }
+  direction(x: number, z: number) {
+    return screenDirection(x, z);
   }
   point(clientX: number, clientY: number) {
     const rect = this.container.getBoundingClientRect();
@@ -1947,6 +2052,7 @@ export class GameScene {
     this.resizeObserver.disconnect();
     this.disposeGeometry(this.scene, true);
     this.materials.clear();
+    this.art.dispose();
     this.gemGeometry.dispose();
     this.gemMeshes.clear();
     this.terrainMeshes.clear();

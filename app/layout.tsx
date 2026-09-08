@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import ViewportBounds from '@/components/ViewportBounds';
 export const metadata: Metadata = {
   title: 'EMBERHOLD · Hold until dawn',
   description: 'สร้างฐาน ต่อสู้ และอยู่รอดไปด้วยกัน — เกม co-op แนวตั้ง',
@@ -17,7 +18,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="th">
-      <body>{children}</body>
+      <body>
+        <ViewportBounds />
+        {children}
+      </body>
     </html>
   );
 }
