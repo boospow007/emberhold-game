@@ -1,8 +1,8 @@
-# 07 — PvP และ netcode แบบ server-authoritative (ร่าง v0.1)
+# 07 — PvP และ netcode แบบ server-authoritative (v0.2)
 
 - วันที่: 2026-09-08
 - ที่มา: การตัดสินใจใน `01-direction.md` ข้อ 8.3 (PvP ทำทีหลัง, ไม่มี wave NPC, ทุกคนเท่าเทียม, รอครบแล้วค่อยเริ่ม, สไตล์ Yuri's Revenge) และข้อ 9 (netcode ปัจจุบันใช้กับ PvP ไม่ได้)
-- สถานะ: ร่างแรกสำหรับวางแผนร่วมกัน ทุกข้อเป็น [เสนอ] ยกเว้นที่ระบุ [กำหนด]
+- สถานะ: v0.2 — ตัดสินใจเรื่องที่รัน server แล้ว (2026-09-08): **server แยกบน DigitalOcean, deploy ผ่าน GitHub Actions, ฐานข้อมูล MongoDB Atlas** ข้ออื่นยังเป็น [เสนอ]
 
 ---
 
@@ -38,7 +38,9 @@
 
 **[เสนอ] เลือก A** เพราะแก้ทั้งความยุติธรรม fog of war และปัญหา host หายของ co-op ในคราวเดียว ส่วน lockstep (ที่ Yuri's Revenge ใช้จริง) เหมาะกับเกมที่ต้นทุน server ต่ำเป็นเป้าหลัก แต่ maphack และ desync จะกินเวลาดีบั๊กมาก
 
-**[คำถาม] ที่รัน server**
+**[กำหนด] ที่รัน server (2026-09-08)**: **ทางเลือกที่ 2 — server แยก** บนเครื่อง DigitalOcean ที่มีอยู่ (มี IP, user, password) deploy อัตโนมัติผ่าน GitHub Actions และใช้ MongoDB Atlas ที่มีอยู่เป็นฐานข้อมูลของ PvP รายละเอียดในข้อ 5.5
+
+ทางเลือกที่พิจารณาแล้ว (เก็บไว้เป็นบันทึก)
 1. **Cloudflare Durable Object + WebSocket** ห้องละ 1 object รัน loop ด้วย `setInterval`/alarm ขณะมี WebSocket เชื่อมอยู่ อยู่ในระบบเดิม (D1, Worker) ไม่ต้องดูแล server แยก **ต้องยืนยันว่า OpenAI Sites hosting เปิด Durable Objects ให้ใช้** (`.openai/hosting.json` ตอนนี้มีแค่ d1/r2 และ `wrangler.json` ที่ build ออกมามี `durable_objects.bindings: []`)
 2. **Server แยก** (Node บน Fly.io/Railway) รัน engine + WebSocket ยืดหยุ่นสุด แต่มีระบบต้องดูแลเพิ่ม และต้องแชร์ session cookie/ยืนยันตัวตนข้ามโดเมน
 3. ถ้าทั้งสองไม่ได้: ใช้ lockstep (B) ผ่าน relay บน HTTP long-poll ซึ่งช้าและไม่แนะนำ
@@ -112,6 +114,29 @@ client (WebSocket)  ──input 10–20/s──▶  Durable Object "RoomSim"
 - interpolation: เก็บ snapshot 2 อันล่าสุดแล้ว lerp ตำแหน่ง (scene ทำ lerp อยู่แล้วบางส่วน)
 - ฮีโร่ของตัวเองใช้ client-side prediction เฉพาะการเดิน (แก้ตำแหน่งเมื่อ server ต่าง > 1.5)
 
+### 5.5 server แยกบน DigitalOcean **[กำหนด]** + รายละเอียด **[เสนอ]**
+
+```
+เบราว์เซอร์ ──HTTPS── Worker บน Sites (โปรไฟล์, Ember, ห้อง co-op เดิม, ออก "ตั๋ว" PvP)
+     │
+     └──WSS──▶ pvp.<โดเมน>  (Caddy: TLS อัตโนมัติ) ──▶ Node "emberhold-server" (Docker)
+                                                          ├─ ห้อง PvP ในหน่วยความจำ, engine.step 10/s
+                                                          ├─ ตรวจตั๋ว HMAC จาก Worker
+                                                          └─ MongoDB Atlas: ผลแมตช์, rating, สถิติ
+```
+
+**โค้ดอยู่ใน repo เดียวกัน** โฟลเดอร์ `server/` import `lib/game/engine.ts` และ `terrain.ts` ตรงๆ (โค้ดชุดเดียว ไม่ต้อง publish package) รันด้วย Node 22 `--experimental-strip-types` เหมือนเทสต์
+
+**การยืนยันตัวตนข้ามโดเมน (ticket)**: cookie `ember_session` อยู่กับโดเมนของ Sites ส่งข้าม WebSocket ไปอีกโดเมนไม่ได้ จึงให้ Worker ออก **ตั๋วอายุสั้น** ผ่าน action ใหม่ `pvp-ticket` เป็นข้อความ `profileId.name.exp` + HMAC-SHA256 ด้วยความลับร่วม `PVP_SECRET` (ตั้งไว้ทั้งสองฝั่ง) client เปิด WebSocket พร้อมตั๋ว server ตรวจลายเซ็นและวันหมดอายุ ไม่ต้องแชร์ session ไม่ต้องแตะ D1 จากเครื่อง DO
+
+**ฐานข้อมูล**: โปรไฟล์/Ember/ห้อง co-op ยังอยู่ D1 (ระบบเดิม) ส่วน MongoDB Atlas เก็บเฉพาะของ PvP: `matches` (seed, ผู้เล่น, ทีม, ผล, ระยะเวลา, เหตุผลที่จบ), `ratings` (profileId, elo, ชนะ/แพ้), `reports` (dump world ตอนจบเพื่อดีบั๊ก ถ้าต้องการ)
+
+**Deploy ผ่าน GitHub Actions**: เมื่อ push ไป `main` และมีการเปลี่ยนใน `server/**` หรือ `lib/game/**` → workflow เชื่อม SSH ไปเครื่อง DO → `git pull` (หรือ rsync) → `docker compose up -d --build` → เช็ค `/health` ค่าลับเก็บใน **GitHub Secrets** เท่านั้น: `DO_HOST` (IP), `DO_USER`, `DO_SSH_KEY` (แนะนำสร้าง SSH key แทน password; ถ้าจำเป็นใช้ `DO_PASSWORD` กับ sshpass ได้แต่ปลอดภัยน้อยกว่า) ส่วนบนเครื่องมีไฟล์ `server/.env` ที่ไม่อยู่ใน git: `MONGODB_URI`, `PVP_SECRET`, `ORIGIN` (โดเมนของเกม สำหรับตรวจ origin), `PORT`
+
+**TLS**: เว็บเป็น HTTPS จึงต้องใช้ `wss://` ซึ่งต้องมีใบรับรอง ใช้ **Caddy** ใน docker compose ออก Let's Encrypt อัตโนมัติ ต้องมี **ชื่อโดเมน** ชี้มาที่ IP ถ้ายังไม่มีโดเมนใช้ `<ip-with-dashes>.sslip.io` ได้ฟรี **[คำถาม]** มีโดเมนสำหรับ server ไหม
+
+**ขนาดเครื่อง**: engine 1 ห้องใช้ CPU ราว 1–3ms ต่อ tick ที่ 10 tick/s เครื่อง 1 vCPU รับได้หลายสิบห้องพร้อมกัน วัดจริงในขั้น 6.2
+
 ### 5.4 ย้าย co-op มาใช้ด้วย (ทีหลัง)
 เมื่อ A ทำงานแล้ว co-op ใช้ DO เดียวกันโดยเปิด wave NPC ปัญหา host หาย/host migration หายไปทั้งหมด และ late join ก็ง่ายขึ้น HTTP polling เก็บไว้เป็น fallback
 
@@ -119,7 +144,7 @@ client (WebSocket)  ──input 10–20/s──▶  Durable Object "RoomSim"
 
 | ขั้น | งาน | ผลลัพธ์ที่ทดสอบได้ |
 |---|---|---|
-| 6.0 | **ยืนยันที่รัน server** (DO บน Sites ใช้ได้ไหม) ทดลอง DO + WebSocket เปล่าๆ 1 ตัว | echo ผ่าน WebSocket จาก production |
+| 6.0 | โครง `server/` (health + WebSocket echo + ตรวจตั๋ว), Docker + Caddy, workflow deploy ไป DigitalOcean, เชื่อม Mongo Atlas | `wss://` echo ได้จากเครื่องจริง และ `/health` รายงาน Mongo ok |
 | 6.1 | Engine: `team` บน player/unit/building, โหมด pvp ไม่มี wave, เล็งเป้าตามทีม, ตารางแพ้ทาง, คำสั่ง `attack`, ชนะเมื่อฐานพัง, แผนที่กระจก | เทสต์ engine: สองทีมสู้กันจนฐานพัง, แผนที่สมมาตรจริง |
 | 6.2 | RoomSim DO: loop, join/ready/input, snapshot บีบ, checkpoint, ผลลง D1 | เทสต์ integration ผ่าน wrangler dev |
 | 6.3 | Client: `SocketLink`, lobby PvP (เลือกทีม, พร้อม), interpolation, HUD ฝ่ายตรงข้าม (HP ฐาน, จำนวนหน่วยที่เห็น) | เล่น 1v1 จริงสองเบราว์เซอร์ |
@@ -132,7 +157,7 @@ client (WebSocket)  ──input 10–20/s──▶  Durable Object "RoomSim"
 ## 7. คำถามที่ต้องตอบก่อนเริ่ม
 
 1. **[คำถาม]** สถาปัตยกรรม A (server-authoritative) ตามที่แนะนำ หรือ B (lockstep)
-2. **[คำถาม]** ที่รัน server: ลอง Durable Object บน Sites ก่อน (ถ้าไม่ได้ค่อยไป server แยก) ใช่ไหม
+2. ~~ที่รัน server~~ **ตอบแล้ว**: server แยกบน DigitalOcean + GitHub Actions + Mongo Atlas (คำถามย่อยที่เหลือ: มีโดเมนสำหรับ `wss://` ไหม และใช้ SSH key แทน password ได้ไหม)
 3. **[คำถาม]** กฎเต็มแบบเร่งจังหวะ (1 วัน = 60 วินาที, เหมืองในฐานหมด 12 วัน) โอเคไหม
 4. **[คำถาม]** เอา fog of war หรือไม่
 5. **[คำถาม]** เริ่ม 1v1 ก่อนใช่ไหม 2v2 ตามหลัง
