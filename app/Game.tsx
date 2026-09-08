@@ -63,6 +63,7 @@ import {
   HALF,
   step,
   command,
+  addPlayer,
   dist,
   reward,
   daysSurvived,
@@ -154,7 +155,7 @@ export default function Game({
     scene = useRef<GameScene | null>(null),
     input = useRef<Input>(emptyInput()),
     remote = useRef<Record<string, Input>>({}),
-    seq = useRef(0),
+    seq = useRef(session.world.acks?.[session.profile.id] || 0),
     placement = useRef<{ kind: BuildKind; x: number; z: number } | null>(null),
     paused = useRef(false),
     panelRef = useRef(''),
@@ -316,6 +317,11 @@ export default function Game({
             currentIds.has(p.id),
           );
           for (const p of data.players) {
+            // Members who joined mid-run get a hero at the team's level.
+            if (!world.current.players.some((q) => q.id === p.id)) {
+              addPlayer(world.current, p, p.weapon);
+              world.current.notice = p.name + ' เข้าร่วมปกป้องอาณาจักร';
+            }
             remote.current[p.id] = p.online ? p.input : emptyInput();
           }
         } else if (data.snapshot) {

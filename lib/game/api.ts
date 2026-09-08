@@ -11,8 +11,11 @@ export type RoomSummary = {
   name: string;
   map: MapId;
   days: number;
+  day: number;
+  status: 'lobby' | 'playing';
   count: number;
 };
+export type CurrentRoom = RoomInfo & { status: string; day: number };
 export type SavedSeed = {
   id: string;
   seed: string;
@@ -28,7 +31,7 @@ export type LobbyMember = Profile & {
   online: boolean;
 };
 type Results = {
-  profile: { profile: Profile };
+  profile: { profile: Profile; room: CurrentRoom | null };
   name: { ok: boolean };
   purchase: { profile: Profile };
   list: { rooms: RoomSummary[] };

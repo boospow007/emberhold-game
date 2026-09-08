@@ -40,7 +40,7 @@ node --experimental-strip-types --test --test-name-pattern="respawns" tests/engi
 Local D1 state lives in `.wrangler/state/v3/d1`. The `drizzle/*.sql` migrations must be applied there before the API works; Sites applies them automatically on deploy. There is no migrations table locally, so apply a new migration directly to the Miniflare SQLite file (`wrangler d1 execute` with `dist/server/wrangler.json` targets a different persist path and will not work):
 
 ```bash
-sed 's/--> statement-breakpoint//g' drizzle/0004_smooth_avengers.sql | sqlite3 .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite
+sed 's/--> statement-breakpoint//g' drizzle/0005_fresh_roughhouse.sql | sqlite3 .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite
 ```
 
 The Worker bindings (D1 as `DB`) are declared inline in `vite.config.ts` from `.openai/hosting.json`, not in a root `wrangler.toml`.
@@ -66,6 +66,7 @@ The game is split into four layers that must stay separate:
 - Every ~180ms each client POSTs `sync` with its `Input` (`x`, `z` in [-1,1] plus a queue of sequenced `Command`s). The host additionally uploads the full `World` snapshot. The route stores inputs per member and the snapshot per room; the response returns all members' inputs (used by the host) and the snapshot (used by guests).
 - Commands carry a monotonically increasing `seq`. The engine records `world.acks[playerId]`, and guests drop queued commands with `seq <= ack`, which is what makes replication exactly-once. Never process a command without updating `acks`.
 - Only the host's snapshot is accepted; guest snapshots are ignored server-side. Room liveness is the `rooms.updated` heartbeat (45s timeout) and per-member `online` is `updated` within 3s.
+- Rooms accept joins while `lobby` or `playing`. The host adds any lobby member missing from `world.players` on its next sync (`addPlayer` gives late joiners the team's average level). `profile` returns the caller's live room so a reload can rejoin; `Game` seeds its command `seq` from `world.acks` so post-reconnect commands are not dropped. There is still no host migration.
 - Rewards are rows in `rewards` keyed `run + profileId`; `solo-reward` and `claim` are idempotent through `INSERT OR IGNORE` plus a `claimed` flag. Preserve this when touching reward logic.
 
 ### Frontend

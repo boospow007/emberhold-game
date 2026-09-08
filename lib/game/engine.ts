@@ -541,6 +541,15 @@ export function newWorld(map: MapId, seed?: string, days = 0): World {
 export function addPlayer(w: World, profile: Profile, weapon: Weapon) {
   if (w.players.some((p) => p.id === profile.id)) return;
   const i = w.players.length;
+  // Late joiners catch up to the team's average level and choose their perks.
+  const level = w.players.length
+    ? Math.max(
+        1,
+        Math.floor(
+          w.players.reduce((s, p) => s + p.level, 0) / w.players.length,
+        ),
+      )
+    : 1;
   w.players.push({
     id: profile.id,
     name: profile.name || 'ผู้พิทักษ์',
@@ -552,9 +561,9 @@ export function addPlayer(w: World, profile: Profile, weapon: Weapon) {
     angle: 0,
     weapon,
     dead: 0,
-    level: 1,
+    level,
     xp: 0,
-    picks: 0,
+    picks: level - 1,
     power: 1 + profile.power * 0.08,
     haste: 1,
     lastHit: 0,

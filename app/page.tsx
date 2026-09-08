@@ -37,6 +37,7 @@ import {
   type LobbyMember,
   type RoomSummary,
   type SavedSeed,
+  type CurrentRoom,
 } from '@/lib/game/api';
 import {
   newWorld,
@@ -83,6 +84,7 @@ export default function Home() {
     [seed, setSeed] = useState(''),
     [days, setDays] = useState(80),
     [save, setSave] = useState<SaveSlot | null>(null),
+    [current, setCurrent] = useState<CurrentRoom | null>(null),
     [savedSeeds, setSavedSeeds] = useState<SavedSeed[]>([]);
   function loadSave(profileId: string) {
     try {
@@ -106,6 +108,7 @@ export default function Home() {
       setProfile(r.profile);
       setName(r.profile.name);
       loadSave(r.profile.id);
+      setCurrent(r.room);
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -198,6 +201,26 @@ export default function Home() {
     const world = newWorld(map, seed, days);
     addPlayer(world, profile, weapon);
     setSession({ world, profile, weapon });
+  }
+  function rejoin() {
+    if (!current) return;
+    setError('');
+    setRoom({
+      code: current.code,
+      host: current.host,
+      map: current.map,
+      seed: current.seed,
+      days: current.days,
+    });
+    setMembers([]);
+    setModal('coop');
+  }
+  async function leaveCurrent() {
+    if (!current) return;
+    try {
+      await api('leave', { code: current.code });
+    } catch {}
+    setCurrent(null);
   }
   function resume() {
     if (!profile || !save) return;
@@ -523,6 +546,32 @@ export default function Home() {
               <CalendarDays size={15} /> สัปดาห์นี้
             </button>
           </div>
+          {current && !room && (
+            <div className="resume-card rejoin">
+              <span>
+                <b>
+                  {current.status === 'playing'
+                    ? 'ห้องของคุณกำลังเล่นอยู่'
+                    : 'คุณยังอยู่ในห้องรอ'}
+                </b>
+                <small>
+                  #{current.code} · {MAPS[current.map].name}
+                  {current.status === 'playing' ? ` · วันที่ ${current.day}` : ''}
+                  {current.host ? ' · คุณเป็นเจ้าของห้อง' : ''}
+                </small>
+              </span>
+              <button className="primary" onClick={rejoin}>
+                <Radio size={15} /> กลับเข้าห้อง
+              </button>
+              <button
+                className="secondary"
+                aria-label="ออกจากห้อง"
+                onClick={leaveCurrent}
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
+          )}
           {save && (
             <div className="resume-card">
               <span>
@@ -647,7 +696,7 @@ export default function Home() {
                 </button>
               ) : (
                 <p className="waiting">
-                  <Radio size={17} /> รอเจ้าของห้องเริ่มเกม
+                  <Radio size={17} /> รอเจ้าของห้องเริ่มเกม หรือกำลังเข้าร่วมเกมที่เล่นอยู่…
                 </p>
               )}
               <button className="secondary wide" onClick={leave}>
@@ -718,7 +767,14 @@ export default function Home() {
                           onClick={() => join(r.code)}
                         >
                           <span>
-                            <b>{r.name}</b>
+                            <b>
+                              {r.name}
+                              {r.status === 'playing' && (
+                                <em className="live-badge">
+                                  กำลังเล่น · วันที่ {r.day}
+                                </em>
+                              )}
+                            </b>
                             <small>
                               {MAPS[r.map as MapId]?.name} ·{' '}
                               {lengthLabel(r.days)} · #{r.code}

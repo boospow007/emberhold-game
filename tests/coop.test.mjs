@@ -88,9 +88,10 @@ test('room discovery, joins, replicated input/builds, room limit and host author
     const fake = { ...world, res: { ...world.res, gold: 999999 } };
     await guest('sync', { code: r.code, snapshot: fake, input: {} });
     assert.equal((await host('lobby', { code: r.code })).snapshot.res.gold, 45);
+    // Running rooms accept late joiners, but this one is already full.
     assert.equal(
       (await fifth('join', { code: r.code, weapon: 'bow' })).status,
-      404,
+      409,
     );
     await guest('leave', { code: r.code });
     assert.equal((await host('lobby', { code: r.code })).players.length, 3);
@@ -166,4 +167,55 @@ test('rooms carry a seed and profiles can save, list and delete seeds', async ()
   assert.equal((await guest('seeds')).seeds.length, 0);
   const gone = await host('seed-delete', { id: again.seeds[0].id });
   assert.equal(gone.seeds.length, 0);
+});
+test('players can join a running room, reconnect through profile, and the list shows live rooms', async () => {
+  const host = client(),
+    late = client();
+  const hp = (await host('profile')).profile;
+  const r = await host('create', {
+    map: 'forest',
+    weapon: 'bow',
+    seed: 'LATE1',
+    days: 30,
+  });
+  try {
+    const world = newWorld('forest', 'LATE1', 30);
+    addPlayer(world, hp, 'bow');
+    world.wave = 3;
+    world.players[0].level = 5;
+    await host('sync', {
+      code: r.code,
+      snapshot: world,
+      input: { x: 0, z: 0, commands: [] },
+    });
+    const listed = (await late('list')).rooms.find((x) => x.code === r.code);
+    assert.ok(listed, 'running room is listed');
+    assert.equal(listed.status, 'playing');
+    assert.equal(listed.day, 3);
+    const j = await late('join', { code: r.code, weapon: 'staff' });
+    assert.equal(j.status, 200);
+    assert.equal(j.days, 30);
+    const lobby = await late('lobby', { code: r.code });
+    assert.equal(lobby.status, 'playing');
+    assert.equal(lobby.snapshot.wave, 3);
+    assert.equal(lobby.players.length, 2);
+    // The host's next sync would call addPlayer for the newcomer: they catch up to the team level.
+    const lp = lobby.players.find((p) => p.id !== hp.id);
+    addPlayer(world, lp, lp.weapon);
+    const me = world.players.find((p) => p.id === lp.id);
+    assert.equal(me.level, 5);
+    assert.equal(me.picks, 4);
+    // A reload keeps the cookie, so profile reports the live room for both members.
+    const back = await late('profile');
+    assert.equal(back.room?.code, r.code);
+    assert.equal(back.room?.host, false);
+    assert.equal(back.room?.status, 'playing');
+    assert.equal(back.room?.day, 3);
+    assert.equal((await host('profile')).room?.host, true);
+    await late('leave', { code: r.code });
+    assert.equal((await late('profile')).room, null);
+  } finally {
+    await host('leave', { code: r.code });
+  }
+  assert.equal((await host('profile')).room, null);
 });

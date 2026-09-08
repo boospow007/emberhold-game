@@ -17,6 +17,7 @@ type DbRoom = {
   map: MapId;
   seed: string;
   days: number;
+  day: number;
   updated: number;
   snapshot: string | null;
   status: string;
@@ -98,7 +99,28 @@ export async function POST(req: Request) {
       .first<DbProfile>();
     if (!profile) throw new Error('Profile unavailable');
     const result = (data: unknown, status = 200) => json(data, status, cookie);
-    if (b.action === 'profile') return result({ profile: profileRow(profile) });
+    if (b.action === 'profile') {
+      const current = await db
+        .prepare(
+          "SELECT r.code,r.host,r.map,r.seed,r.days,r.day,r.status FROM members m JOIN rooms r ON r.code=m.room WHERE m.id=? AND r.updated>? AND r.status IN ('lobby','playing')",
+        )
+        .bind(id, now - 45000)
+        .first<DbRoom & { code: string }>();
+      return result({
+        profile: profileRow(profile),
+        room: current
+          ? {
+              code: current.code,
+              host: current.host === id,
+              map: current.map,
+              seed: current.seed || '',
+              days: current.days || 0,
+              day: current.day || 0,
+              status: current.status,
+            }
+          : null,
+      });
+    }
     if (b.action === 'name') {
       if (!valid(b.name, 20))
         return result({ error: 'ชื่อยาวได้ไม่เกิน 20 ตัวอักษร' }, 400);
@@ -212,7 +234,7 @@ export async function POST(req: Request) {
     if (b.action === 'list') {
       const rooms = await db
         .prepare(
-          "SELECT r.code,r.name,r.map,r.days,(SELECT COUNT(*) FROM members m WHERE m.room=r.code AND m.updated>?) AS count FROM rooms r WHERE r.status='lobby' AND r.updated>? ORDER BY r.updated DESC LIMIT 25",
+          "SELECT r.code,r.name,r.map,r.days,r.day,r.status,(SELECT COUNT(*) FROM members m WHERE m.room=r.code AND m.updated>?) AS count FROM rooms r WHERE r.status IN ('lobby','playing') AND r.updated>? ORDER BY r.status DESC, r.updated DESC LIMIT 25",
         )
         .bind(now - 45000, now - 45000)
         .all<{
@@ -220,6 +242,8 @@ export async function POST(req: Request) {
           name: string;
           map: MapId;
           days: number;
+          day: number;
+          status: 'lobby' | 'playing';
           count: number;
         }>();
       return result({ rooms: rooms.results.filter((r) => r.count < 4) });
@@ -268,11 +292,11 @@ export async function POST(req: Request) {
         return result({ error: 'กรอกเลขห้อง 6 หลัก' }, 400);
       const room = await db
         .prepare(
-          "SELECT * FROM rooms WHERE code=? AND status='lobby' AND updated>?",
+          "SELECT * FROM rooms WHERE code=? AND status IN ('lobby','playing') AND updated>?",
         )
         .bind(b.code, now - 45000)
         .first<DbRoom>();
-      if (!room) return result({ error: 'ไม่พบห้อง หรือห้องเริ่มเล่นแล้ว' }, 404);
+      if (!room) return result({ error: 'ไม่พบห้อง หรือห้องปิดแล้ว' }, 404);
       await db.prepare('DELETE FROM members WHERE id=?').bind(id).run();
       const r = await db
         .prepare(
@@ -412,11 +436,12 @@ export async function POST(req: Request) {
             return result({ error: 'สถานะเกมไม่ถูกต้อง' }, 400);
           await db
             .prepare(
-              'UPDATE rooms SET snapshot=?,status=?,updated=? WHERE code=?',
+              'UPDATE rooms SET snapshot=?,status=?,day=?,updated=? WHERE code=?',
             )
             .bind(
               JSON.stringify(s),
               s.phase === 'over' ? 'over' : 'playing',
+              Math.max(0, Math.floor(Number(s.wave) || 0)),
               now,
               b.code,
             )
